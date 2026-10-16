@@ -1,80 +1,49 @@
-# Minimalist Web Notepad
+# Web Notepad
 
-This is an open-source clone of the now-defunct notepad.cc: "a piece of paper in the cloud".
+A web notepad in a single PHP file: open a URL, type, and it saves itself.
+Fork of [pereorga/minimalist-web-notepad](https://github.com/pereorga/minimalist-web-notepad).
 
-See demo at https://notes.orga.cat or https://notes.orga.cat/whatever.
+![Screenshot](screenshot.png)
+
+## What this fork adds
+
+- **Safe saving across devices**: if the note changed on another device, it is not overwritten; the refresh button turns orange so you can load the server version.
+- **Refresh and delete buttons** on the right side of the editor.
+- **Dark theme** and a larger font.
+- **Copy by block**: every block of text separated by a blank line gets an icon on the left that copies it to the clipboard.
+- **Last modified date** below the editor.
 
 ## Installation
 
-Make sure the web server is allowed to write to the `_tmp` directory.
+1. Copy the files to your server (PHP 7+).
+2. Make the notes directory writable by the web server. It is `_tmp` by default; change it with `$save_path` at the top of `index.php` (preferably outside the document root).
+3. Set up URL rewriting so that `/<note>` reaches `index.php?note=<note>`:
 
-### On Apache
+**Apache**: with `mod_rewrite` enabled and `AllowOverride` allowed, the included `.htaccess` is enough.
 
-You may need to enable mod_rewrite and allow `.htaccess` files in your site configuration.
-See [How To Set Up mod_rewrite for Apache](https://www.digitalocean.com/community/tutorials/how-to-set-up-mod_rewrite-for-apache-on-ubuntu-14-04).
+**Nginx** (project under `/notes/`):
 
-### On Nginx
-
-To enable URL rewriting, put something like this in your configuration file:
-
-If the project resides in the root directory:
-```
-location / {
-    rewrite ^/([a-zA-Z0-9_-]+)$ /index.php?note=$1;
-}
-```
-
-If the project resides in a subdirectory:
-```
-location ~* ^/notes/([a-zA-Z0-9_-]+)$ {
-    try_files $uri /notes/index.php?note=$1;
-}
-```
-
-If parameters need to be passed in Nginx (such as `?raw`), then `&$args` needs to be added to the end of the `$1` match:
 ```
 location ~* ^/notes/([a-zA-Z0-9_-]+)$ {
     try_files $uri /notes/index.php?note=$1&$args;
 }
 ```
 
-## Usage (CLI)
-
-Using the command-line interface you can both save and retrieve notes. Here are some examples using `curl`:
-
-Retrieve a note's content and save it to a local file:
+## Command-line usage
 
 ```
-curl https://example.com/notes/test > test.txt
-```
+# Read a note (curl and wget get plain text)
+curl https://example.com/notes/test
 
-Save specific text to a note:
-
-```
-curl https://example.com/notes/test -d 'hello,
-
-welcome to my pad!
-'
-```
-
-Save the content of a local file (e.g., `/etc/hosts`) to a note:
-
-```
+# Save text or a file to a note
+curl https://example.com/notes/test -d 'hello'
 cat /etc/hosts | curl https://example.com/notes/hosts --data-binary @-
 ```
 
-## Copyright and license
+When reading with `?raw`, curl or wget, the response includes the `X-Note-Version` (content hash) and `X-Note-Mtime` (last modified, Unix timestamp) headers.
 
-Copyright 2012 Pere Orga <pere@orga.cat>
+## License
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this work except in compliance with the License.
-You may obtain a copy of the License at:
+Copyright 2012 Pere Orga <pere@orga.cat>. Changes in this fork are released under the same license.
 
-   http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
+Licensed under the [Apache License 2.0](http://www.apache.org/licenses/LICENSE-2.0).
