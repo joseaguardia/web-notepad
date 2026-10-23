@@ -82,9 +82,13 @@ $initial_mtime = note_mtime($path);
 <link rel="icon" href="favicon.ico" sizes="any">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <style>
+html,
+body {
+    height: 100%;
+}
 body {
     margin: 0;
-    background: #004254;
+    background: #004254 linear-gradient(160deg, #004d61 0%, #002f3d 100%) fixed;
 }
 .container {
     position: absolute;
@@ -109,6 +113,31 @@ body {
 #modified svg {
     flex-shrink: 0;
 }
+#status {
+    flex-shrink: 0;
+    width: 10px;
+    height: 10px;
+    margin-right: 4px;
+    border-radius: 50%;
+    background: currentColor;
+    box-shadow: 0 0 8px currentColor;
+    transition: color 0.3s;
+}
+#status.saved {
+    color: #6ee7b7;
+}
+#status.saving {
+    color: #f5a524;
+    animation: pulse 1s ease-in-out infinite alternate;
+}
+#status.conflict {
+    color: #f28b96;
+}
+@keyframes pulse {
+    to {
+        opacity: 0.3;
+    }
+}
 #tip {
     margin-right: auto;
     min-width: 0;
@@ -119,8 +148,8 @@ body {
 #tip code {
     padding: 1px 6px;
     font: inherit;
-    background: #00303d;
-    border-radius: 3px;
+    background: rgba(0, 0, 0, 0.25);
+    border-radius: 4px;
 }
 @media (max-width: 800px) {
     #tip {
@@ -142,9 +171,15 @@ body {
     background: #001923;
     color: #E3E2DA;
     caret-color: #4fd1e8;
-    border: 1px solid #0a5a6e;
+    border: 1px solid rgba(79, 209, 232, 0.15);
+    border-radius: 12px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
     outline: none;
     font: 20px/1.5 monospace;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+#content:focus {
+    border-color: rgba(79, 209, 232, 0.3);
 }
 #content::selection {
     background: #0a6f88;
@@ -182,8 +217,33 @@ body {
     overflow: hidden;
     pointer-events: none;
 }
+#gutter::after {
+    content: '';
+    position: absolute;
+    top: 12px;
+    right: 0;
+    bottom: 12px;
+    width: 1px;
+    background: rgba(227, 226, 218, 0.08);
+}
 #gutter-inner {
     position: relative;
+}
+.block-bar {
+    position: absolute;
+    left: 4px;
+    width: 3px;
+    border-radius: 2px;
+    background: #4fd1e8;
+    opacity: 0;
+    transition: opacity 0.15s;
+}
+.copy-btn:hover + .block-bar {
+    opacity: 0.8;
+}
+.copy-btn.copied + .block-bar {
+    background: #6ee7b7;
+    opacity: 0.8;
 }
 .copy-btn {
     position: absolute;
@@ -197,10 +257,11 @@ body {
     color: #E3E2DA;
     background: transparent;
     border: 0;
-    border-radius: 4px;
+    border-radius: 6px;
     opacity: 0.4;
     cursor: pointer;
     pointer-events: auto;
+    transition: opacity 0.15s, background 0.15s;
 }
 .copy-btn:hover {
     opacity: 1;
@@ -232,34 +293,53 @@ body {
     font-size: 54px;
     line-height: 1;
     cursor: pointer;
-    color: #E3E2DA;
-    background: #005a72;
-    border: 1px solid #0a7a94;
-    border-radius: 4px;
+    --accent: 79, 209, 232;
+    color: rgb(var(--accent));
+    background: rgba(var(--accent), 0.08);
+    border: 1px solid rgba(var(--accent), 0.35);
+    border-radius: 14px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+    backdrop-filter: blur(4px);
+    transition: background 0.15s, border-color 0.15s, transform 0.15s;
+}
+.action:hover {
+    background: rgba(var(--accent), 0.2);
+    border-color: rgba(var(--accent), 0.7);
+    transform: translateY(-1px);
+}
+.action:disabled {
+    opacity: 0.5;
+    cursor: default;
 }
 .action small {
-    margin-top: 4px;
+    max-height: 0;
+    margin-top: 0;
+    overflow: hidden;
     font-size: 16px;
+    line-height: 20px;
+    opacity: 0;
+    transition: max-height 0.15s, margin-top 0.15s, opacity 0.15s;
+}
+.action:hover small {
+    max-height: 20px;
+    margin-top: 4px;
+    opacity: 1;
 }
 #copy-all {
     top: 10px;
-    color: #d4f0a0;
-    background: #3d5a1e;
-    border-color: #5c8a2a;
+    --accent: 181, 224, 122;
 }
 #refresh {
     top: 110px;
 }
 #clear {
     bottom: 10px;
-    color: #f1aeb5;
-    background: #6b2c33;
-    border-color: #8a3b42;
+    --accent: 242, 139, 150;
 }
 #refresh.conflict {
-    color: #fff;
-    background: #8a5300;
-    border-color: #f59f00;
+    --accent: 245, 165, 36;
+    background: rgba(var(--accent), 0.25);
+    border-color: rgb(var(--accent));
 }
 @media print {
     .container,
@@ -285,13 +365,20 @@ if ($initial_text !== false) {
 <div id="mirror" aria-hidden="true"></div>
 <button id="copy-all" class="action" type="button" title="Copy all"><svg class="icon-copy" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg><svg class="icon-check" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg><small>copy all</small></button>
 <button id="refresh" class="action" type="button" title="Refresh"><span id="refresh-icon">⟳</span><small>refresh</small></button>
-<button id="clear" class="action" type="button" title="Clear note"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m16 22-1-4"/><path d="M19 14a1 1 0 0 0 1-1v-1a2 2 0 0 0-2-2h-3a1 1 0 0 1-1-1V4a2 2 0 0 0-4 0v5a1 1 0 0 1-1 1H6a2 2 0 0 0-2 2v1a1 1 0 0 0 1 1"/><path d="M5 14h14l1.973 6.767A1 1 0 0 1 20 22H4a1 1 0 0 1-.973-1.233z"/><path d="m8 22 1-4"/></svg><small>clear</small></button>
+<button id="clear" class="action" type="button" title="Clear note"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m16 22-1-4"/><path d="M19 14a1 1 0 0 0 1-1v-1a2 2 0 0 0-2-2h-3a1 1 0 0 1-1-1V4a2 2 0 0 0-4 0v5a1 1 0 0 1-1 1H6a2 2 0 0 0-2 2v1a1 1 0 0 0 1 1"/><path d="M5 14h14l1.973 6.767A1 1 0 0 1 20 22H4a1 1 0 0 1-.973-1.233z"/><path d="m8 22 1-4"/></svg><small>clear</small></button>
 </div>
-<div id="modified"><span id="tip">To upload: <code id="tip-command"></code></span><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M12 7v5l3 2"/></svg><span id="modified-time" title="Last modified"></span></div>
+<div id="modified"><span id="tip">To upload: <code id="tip-command"></code></span><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M12 7v5l3 2"/></svg><span id="modified-time" title="Last modified"></span><span id="status"></span></div>
 <pre id="printable"></pre>
 <script>
+function updateStatus() {
+    var state = conflict ? 'conflict' : (content !== textarea.value ? 'saving' : 'saved');
+    statusDot.className = state;
+    statusDot.title = {saved: 'Saved', saving: 'Saving…', conflict: 'Not saved: changed on another device'}[state];
+}
+
 function setConflict(value) {
     conflict = value;
+    updateStatus();
     refreshButton.classList.toggle('conflict', value);
     refreshButton.title = value ? 'This note changed on another device: click to load the server version' : 'Refresh';
 }
@@ -309,6 +396,7 @@ function uploadContent() {
                 content = temp;
                 version = request.responseText;
                 setMtime(request.getResponseHeader('X-Note-Mtime'));
+                updateStatus();
             } else if (request.status === 409) {
 
                 // The note changed on another device since it was loaded here.
@@ -415,14 +503,20 @@ function updateGutter() {
     mirror.style.width = textarea.clientWidth + 'px';
     mirror.textContent = '';
     var markers = [];
+    var endMarkers = [];
     var last = 0;
-    blocks.forEach(function(block) {
-        mirror.appendChild(document.createTextNode(text.slice(last, block.start)));
+    function addMarker(list) {
         var marker = document.createElement('span');
         marker.className = 'marker';
         mirror.appendChild(marker);
-        markers.push(marker);
-        last = block.start;
+        list.push(marker);
+    }
+    blocks.forEach(function(block) {
+        mirror.appendChild(document.createTextNode(text.slice(last, block.start)));
+        addMarker(markers);
+        mirror.appendChild(document.createTextNode(text.slice(block.start, block.end)));
+        addMarker(endMarkers);
+        last = block.end;
     });
     mirror.appendChild(document.createTextNode(text.slice(last)));
 
@@ -443,6 +537,13 @@ function updateGutter() {
             copyBlock(text.slice(block.start, block.end), button);
         };
         gutterInner.appendChild(button);
+
+        // Bar spanning the block, shown while hovering its copy button.
+        var bar = document.createElement('div');
+        bar.className = 'block-bar';
+        bar.style.top = markers[i].offsetTop + 'px';
+        bar.style.height = (endMarkers[i].offsetTop + endMarkers[i].offsetHeight - markers[i].offsetTop) + 'px';
+        gutterInner.appendChild(bar);
     });
     syncGutterScroll();
 }
@@ -471,6 +572,7 @@ function setMtime(header) {
 
 var textarea = document.getElementById('content');
 var modifiedLabel = document.getElementById('modified-time');
+var statusDot = document.getElementById('status');
 document.getElementById('tip-command').textContent = '<command> | curl --data-binary @- ' + window.location.origin + window.location.pathname;
 var mtime = <?php print $initial_mtime; ?>;
 var gutterInner = document.getElementById('gutter-inner');
@@ -488,9 +590,11 @@ printable.appendChild(document.createTextNode(content));
 textarea.focus();
 uploadContent();
 showModified();
+updateStatus();
 
 updateGutter();
 textarea.addEventListener('input', scheduleGutter);
+textarea.addEventListener('input', updateStatus);
 textarea.addEventListener('scroll', syncGutterScroll);
 window.addEventListener('resize', scheduleGutter);
 
@@ -553,6 +657,7 @@ clearButton.onclick = function() {
     // An empty text makes the autosave loop delete the note on the server
     textarea.value = '';
     printable.textContent = '';
+    updateStatus();
     updateGutter();
     (function waitForClear() {
         if (content !== '') {
