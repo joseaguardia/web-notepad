@@ -2,7 +2,7 @@
 
 // Path to the directory to save the notes in, without trailing slash.
 // Should be outside the document root, if possible.
-$save_path = '_tmp';
+$save_path = '/var/lib/notas';
 
 // Disable caching.
 header('Cache-Control: no-store');
@@ -98,9 +98,34 @@ body {
     right: 20px;
     bottom: 14px;
     left: 20px;
-    font: 14px/20px monospace;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    font: 18px/24px monospace;
     color: #E3E2DA;
     opacity: 0.6;
+}
+#modified svg {
+    flex-shrink: 0;
+}
+#tip {
+    margin-right: auto;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+#tip code {
+    padding: 1px 6px;
+    font: inherit;
+    background: #00303d;
+    border-radius: 3px;
+}
+@media (max-width: 800px) {
+    #tip {
+        display: none;
+    }
 }
 #content {
     margin: 0;
@@ -181,11 +206,11 @@ body {
     opacity: 1;
     background: #003040;
 }
-.copy-btn .icon-check,
-.copy-btn.copied .icon-copy {
+.icon-check,
+.copied .icon-copy {
     display: none;
 }
-.copy-btn.copied .icon-check {
+.copied .icon-check {
     display: block;
 }
 .copy-btn.copied {
@@ -214,12 +239,18 @@ body {
 }
 .action small {
     margin-top: 4px;
-    font-size: 12px;
+    font-size: 16px;
+}
+#copy-all {
+    top: 10px;
+    color: #d4f0a0;
+    background: #3d5a1e;
+    border-color: #5c8a2a;
 }
 #refresh {
-    top: 10px;
+    top: 110px;
 }
-#delete {
+#clear {
     bottom: 10px;
     color: #f1aeb5;
     background: #6b2c33;
@@ -252,16 +283,17 @@ if ($initial_text !== false) {
 ?></textarea>
 <div id="gutter"><div id="gutter-inner"></div></div>
 <div id="mirror" aria-hidden="true"></div>
-<button id="refresh" class="action" type="button" title="Refrescar"><span id="refresh-icon">⟳</span><small>refresh</small></button>
-<button id="delete" class="action" type="button" title="Eliminar nota"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg><small>delete</small></button>
+<button id="copy-all" class="action" type="button" title="Copy all"><svg class="icon-copy" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg><svg class="icon-check" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg><small>copy all</small></button>
+<button id="refresh" class="action" type="button" title="Refresh"><span id="refresh-icon">⟳</span><small>refresh</small></button>
+<button id="clear" class="action" type="button" title="Clear note"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m16 22-1-4"/><path d="M19 14a1 1 0 0 0 1-1v-1a2 2 0 0 0-2-2h-3a1 1 0 0 1-1-1V4a2 2 0 0 0-4 0v5a1 1 0 0 1-1 1H6a2 2 0 0 0-2 2v1a1 1 0 0 0 1 1"/><path d="M5 14h14l1.973 6.767A1 1 0 0 1 20 22H4a1 1 0 0 1-.973-1.233z"/><path d="m8 22 1-4"/></svg><small>clear</small></button>
 </div>
-<div id="modified"></div>
+<div id="modified"><span id="tip">To upload: <code id="tip-command"></code></span><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M12 7v5l3 2"/></svg><span id="modified-time" title="Last modified"></span></div>
 <pre id="printable"></pre>
 <script>
 function setConflict(value) {
     conflict = value;
     refreshButton.classList.toggle('conflict', value);
-    refreshButton.title = value ? 'La nota ha cambiado en otro equipo: pulsa para cargar la versión del servidor' : 'Refrescar';
+    refreshButton.title = value ? 'This note changed on another device: click to load the server version' : 'Refresh';
 }
 
 function uploadContent() {
@@ -399,7 +431,7 @@ function updateGutter() {
         var button = document.createElement('button');
         button.type = 'button';
         button.className = 'copy-btn';
-        button.title = 'Copiar este bloque';
+        button.title = 'Copy this block';
         button.innerHTML = COPY_ICONS;
         button.style.top = markers[i].offsetTop + 'px';
 
@@ -428,8 +460,8 @@ function scheduleGutter() {
 
 function showModified() {
     modifiedLabel.textContent = mtime
-        ? 'Última modificación: ' + new Date(mtime * 1000).toLocaleString('es-ES')
-        : 'Nota sin guardar';
+        ? new Date(mtime * 1000).toLocaleTimeString('en-GB', {hour: '2-digit', minute: '2-digit'})
+        : 'Unsaved note';
 }
 
 function setMtime(header) {
@@ -438,7 +470,8 @@ function setMtime(header) {
 }
 
 var textarea = document.getElementById('content');
-var modifiedLabel = document.getElementById('modified');
+var modifiedLabel = document.getElementById('modified-time');
+document.getElementById('tip-command').textContent = '<command> | curl --data-binary @- ' + window.location.origin + window.location.pathname;
 var mtime = <?php print $initial_mtime; ?>;
 var gutterInner = document.getElementById('gutter-inner');
 var mirror = document.getElementById('mirror');
@@ -462,7 +495,7 @@ textarea.addEventListener('scroll', syncGutterScroll);
 window.addEventListener('resize', scheduleGutter);
 
 refreshButton.onclick = function() {
-    if (conflict && !confirm('Esta nota ha cambiado en otro equipo y tus últimos cambios aquí NO se han guardado.\n\nAceptar: descartarlos y cargar la versión del servidor.\nCancelar: mantenerlos para que puedas copiarlos antes.')) {
+    if (conflict && !confirm('This note changed on another device and your latest changes here have NOT been saved.\n\nOK: discard them and load the server version.\nCancel: keep them so you can copy them first.')) {
         return;
     }
     refreshButton.disabled = true;
@@ -504,27 +537,29 @@ refreshButton.onclick = function() {
     })();
 };
 
-var deleteButton = document.getElementById('delete');
-deleteButton.onclick = function() {
+var copyAllButton = document.getElementById('copy-all');
+copyAllButton.onclick = function() {
+    copyBlock(textarea.value, copyAllButton);
+};
+
+var clearButton = document.getElementById('clear');
+clearButton.onclick = function() {
     if (conflict) {
-        alert('Esta nota ha cambiado en otro equipo. Pulsa refresh antes de eliminarla.');
+        alert('This note changed on another device. Click refresh before clearing it.');
         return;
     }
-    if (!confirm('¿Eliminar esta nota?')) {
-        return;
-    }
-    deleteButton.disabled = true;
+    clearButton.disabled = true;
 
     // An empty text makes the autosave loop delete the note on the server
     textarea.value = '';
     printable.textContent = '';
     updateGutter();
-    (function waitForDelete() {
+    (function waitForClear() {
         if (content !== '') {
-            setTimeout(waitForDelete, 200);
+            setTimeout(waitForClear, 200);
             return;
         }
-        deleteButton.disabled = false;
+        clearButton.disabled = false;
     })();
 };
 </script>
