@@ -325,14 +325,14 @@ body {
     opacity: 1;
 }
 #copy-all {
-    top: 10px;
+    top: 100px;
     --accent: 181, 224, 122;
 }
 #refresh {
-    top: 110px;
+    top: 200px;
 }
 #clear {
-    bottom: 10px;
+    bottom: 100px;
     --accent: 242, 139, 150;
 }
 #refresh.conflict {
