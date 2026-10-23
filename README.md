@@ -7,11 +7,11 @@ Fork of [pereorga/minimalist-web-notepad](https://github.com/pereorga/minimalist
 
 ## What this fork adds
 
-- **Safe saving across devices**: if the note changed on another device, it is not overwritten; autosave pauses and the refresh button turns amber so you can load the server version.
+- **Live sync across devices**: changes made on another device (or uploaded with `curl`) show up within a couple of seconds, keeping your cursor in place. Polling pauses while the tab is hidden.
+- **Safe saving across devices**: if you edit on two devices at the same time, the note is not overwritten; autosave pauses and an amber refresh button appears so you can load the server version.
 - **Save status indicator**: a dot next to the time shows whether the note is saved (green), pending (amber) or in conflict (red).
 - **Action buttons** on the right side of the editor (labels appear on hover):
   - **copy all**: copies the whole note to the clipboard.
-  - **refresh**: loads the latest version from the server.
   - **clear**: empties the note (and deletes it on the server) without asking.
 - **Copy by block**: every block of text separated by a blank line gets an icon on the left that copies it to the clipboard; hovering it highlights the block.
 - **Footer** with the last saved time and a ready-to-copy `curl` command to upload to the current note.

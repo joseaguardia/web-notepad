@@ -58,11 +58,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 // Print raw file when explicitly requested, or if the client is curl or wget.
 if (isset($_GET['raw']) || strpos($_SERVER['HTTP_USER_AGENT'], 'curl') === 0 || strpos($_SERVER['HTTP_USER_AGENT'], 'Wget') === 0) {
-    header('X-Note-Version: ' . note_version($path));
+
+    // Read the note once so the text and its version always match.
+    $text = is_file($path) ? file_get_contents($path) : false;
+    $version = $text === false ? '' : md5($text);
+    header('X-Note-Version: ' . $version);
     header('X-Note-Mtime: ' . note_mtime($path));
-    if (is_file($path)) {
+
+    // Nothing to send if the client already has this version (used by the browser to poll for changes).
+    if (isset($_GET['since']) && $_GET['since'] === $version) {
+        header('HTTP/1.0 204 No Content');
+    } elseif ($text !== false) {
         header('Content-type: text/plain');
-        readfile($path);
+        print $text;
     } else {
         header('HTTP/1.0 404 Not Found');
     }
@@ -330,12 +338,14 @@ body {
 }
 #refresh {
     top: 200px;
+    display: none;
 }
 #clear {
     bottom: 100px;
     --accent: 242, 139, 150;
 }
 #refresh.conflict {
+    display: flex;
     --accent: 245, 165, 36;
     background: rgba(var(--accent), 0.25);
     border-color: rgb(var(--accent));
@@ -363,7 +373,7 @@ if ($initial_text !== false) {
 <div id="gutter"><div id="gutter-inner"></div></div>
 <div id="mirror" aria-hidden="true"></div>
 <button id="copy-all" class="action" type="button" title="Copy all"><svg class="icon-copy" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg><svg class="icon-check" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg><small>copy all</small></button>
-<button id="refresh" class="action" type="button" title="Refresh"><span id="refresh-icon">⟳</span><small>refresh</small></button>
+<button id="refresh" class="action" type="button" title="This note changed on another device: click to load the server version"><span id="refresh-icon">⟳</span><small>refresh</small></button>
 <button id="clear" class="action" type="button" title="Clear note"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m16 22-1-4"/><path d="M19 14a1 1 0 0 0 1-1v-1a2 2 0 0 0-2-2h-3a1 1 0 0 1-1-1V4a2 2 0 0 0-4 0v5a1 1 0 0 1-1 1H6a2 2 0 0 0-2 2v1a1 1 0 0 0 1 1"/><path d="M5 14h14l1.973 6.767A1 1 0 0 1 20 22H4a1 1 0 0 1-.973-1.233z"/><path d="m8 22 1-4"/></svg><small>clear</small></button>
 </div>
 <div id="modified"><span id="tip">To upload: <code id="tip-command"></code></span><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M12 7v5l3 2"/></svg><span id="modified-time" title="Last modified"></span><span id="status"></span></div>
@@ -379,7 +389,63 @@ function setConflict(value) {
     conflict = value;
     updateStatus();
     refreshButton.classList.toggle('conflict', value);
-    refreshButton.title = value ? 'This note changed on another device: click to load the server version' : 'Refresh';
+}
+
+// Show the server copy of the note from a ?raw response, keeping the cursor and scroll in place.
+function applyRemote(request) {
+    var text = request.status === 200 ? request.responseText : '';
+    var old = textarea.value;
+    if (text !== old && document.activeElement === textarea) {
+        var start = textarea.selectionStart;
+        var end = textarea.selectionEnd;
+        var scroll = textarea.scrollTop;
+        var prefix = 0;
+        while (prefix < old.length && prefix < text.length && old[prefix] === text[prefix]) {
+            prefix++;
+        }
+
+        // Positions after the first change shift by the length difference.
+        var shift = function(pos) {
+            return pos <= prefix ? pos : Math.min(text.length, Math.max(prefix, pos + text.length - old.length));
+        };
+        textarea.value = text;
+        textarea.setSelectionRange(shift(start), shift(end));
+        textarea.scrollTop = scroll;
+    } else {
+        textarea.value = text;
+    }
+    content = text;
+    version = request.getResponseHeader('X-Note-Version') || '';
+    setMtime(request.getResponseHeader('X-Note-Mtime'));
+    printable.textContent = text;
+    updateStatus();
+    updateGutter();
+}
+
+// Load changes made on other devices, but only when everything typed here is already saved.
+function checkRemote() {
+    if (checking || document.hidden || conflict || saving || content !== textarea.value) {
+        return;
+    }
+    checking = true;
+    var sent = version;
+    var request = new XMLHttpRequest();
+    request.open('GET', window.location.pathname + '?raw&since=' + encodeURIComponent(sent) + '&t=' + Date.now(), true);
+    request.onload = function() {
+        checking = false;
+
+        // Ignore the answer if something changed here while it was on its way.
+        if (version !== sent || conflict || saving || content !== textarea.value) {
+            return;
+        }
+        if (request.status === 200 || request.status === 404) {
+            applyRemote(request);
+        }
+    };
+    request.onerror = function() {
+        checking = false;
+    };
+    request.send();
 }
 
 function uploadContent() {
@@ -391,6 +457,7 @@ function uploadContent() {
         request.open('POST', window.location.href, true);
         request.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded; charset=UTF-8');
         request.onload = function() {
+            saving = false;
             if (request.status === 200) {
                 content = temp;
                 version = request.responseText;
@@ -406,10 +473,12 @@ function uploadContent() {
             setTimeout(uploadContent, 1000);
         }
         request.onerror = function() {
+            saving = false;
 
             // Try again after 1 second.
             setTimeout(uploadContent, 1000);
         }
+        saving = true;
         request.send('text=' + encodeURIComponent(temp) + '&base=' + encodeURIComponent(version));
 
         // Update the printable contents.
@@ -582,12 +651,16 @@ var refreshIcon = document.getElementById('refresh-icon');
 var content = textarea.value;
 var version = '<?php print $initial_version; ?>';
 var conflict = false;
+var saving = false;
+var checking = false;
 
 // Initialize the printable contents with the initial value of the textarea.
 printable.appendChild(document.createTextNode(content));
 
 textarea.focus();
 uploadContent();
+setInterval(checkRemote, 2000);
+document.addEventListener('visibilitychange', checkRemote);
 showModified();
 updateStatus();
 
@@ -609,35 +682,18 @@ refreshButton.onclick = function() {
         refreshIcon.textContent = '⟳';
     }
 
-    // Wait until pending changes are saved, then load the latest copy from the server
-    (function waitAndRefresh() {
-        if (!conflict && content !== textarea.value) {
-            setTimeout(waitAndRefresh, 200);
-            return;
+    // Load the server copy, discarding the local changes
+    var request = new XMLHttpRequest();
+    request.open('GET', window.location.pathname + '?raw&t=' + Date.now(), true);
+    request.onload = function() {
+        if (request.status === 200 || request.status === 404) {
+            applyRemote(request);
+            setConflict(false);
         }
-        var request = new XMLHttpRequest();
-        request.open('GET', window.location.pathname + '?raw&t=' + Date.now(), true);
-        request.onload = function() {
-            if (request.status === 200 || request.status === 404) {
-                var text = request.status === 200 ? request.responseText : '';
-
-                // Skip the update if the user typed something in the meantime
-                // (in conflict, the user already chose to discard local changes)
-                if (conflict || content === textarea.value) {
-                    textarea.value = text;
-                    content = text;
-                    version = request.getResponseHeader('X-Note-Version') || '';
-                    setMtime(request.getResponseHeader('X-Note-Mtime'));
-                    printable.textContent = text;
-                    setConflict(false);
-                    updateGutter();
-                }
-            }
-            done();
-        };
-        request.onerror = done;
-        request.send();
-    })();
+        done();
+    };
+    request.onerror = done;
+    request.send();
 };
 
 var copyAllButton = document.getElementById('copy-all');
