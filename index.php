@@ -333,11 +333,11 @@ body {
     opacity: 1;
 }
 #copy-all {
-    top: 100px;
+    bottom: 220px;
     --accent: 181, 224, 122;
 }
 #refresh {
-    top: 200px;
+    top: 100px;
     display: none;
 }
 #clear {
