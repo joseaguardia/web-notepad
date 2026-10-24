@@ -29,7 +29,7 @@ function note_mtime($path) {
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $text = isset($_POST['text']) ? $_POST['text'] : file_get_contents("php://input");
+    $text = $_POST['text'] ?? file_get_contents('php://input');
 
     // Serialize the version check and the write across concurrent requests.
     $lock = fopen($save_path . '/.lock', 'c');
@@ -38,15 +38,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Reject the save if the note changed since the client loaded it.
     // Clients that send no base version (e.g. curl) skip the check.
     if (isset($_POST['base']) && $_POST['base'] !== note_version($path)) {
-        header('HTTP/1.0 409 Conflict');
+        http_response_code(409);
         die;
     }
 
-    // Update file.
-    file_put_contents($path, $text);
-
-    // If provided input is empty, delete file.
-    if (!strlen($text) && is_file($path)) {
+    // Write to a temp file and rename it, so readers never see a half-written note.
+    // An empty text deletes the note.
+    if (strlen($text)) {
+        file_put_contents($path . '.tmp', $text);
+        rename($path . '.tmp', $path);
+    } elseif (is_file($path)) {
         unlink($path);
     }
 
@@ -57,7 +58,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 // Print raw file when explicitly requested, or if the client is curl or wget.
-if (isset($_GET['raw']) || strpos($_SERVER['HTTP_USER_AGENT'], 'curl') === 0 || strpos($_SERVER['HTTP_USER_AGENT'], 'Wget') === 0) {
+$agent = $_SERVER['HTTP_USER_AGENT'] ?? '';
+if (isset($_GET['raw']) || strpos($agent, 'curl') === 0 || strpos($agent, 'Wget') === 0) {
 
     // Read the note once so the text and its version always match.
     $text = is_file($path) ? file_get_contents($path) : false;
@@ -67,12 +69,12 @@ if (isset($_GET['raw']) || strpos($_SERVER['HTTP_USER_AGENT'], 'curl') === 0 || 
 
     // Nothing to send if the client already has this version (used by the browser to poll for changes).
     if (isset($_GET['since']) && $_GET['since'] === $version) {
-        header('HTTP/1.0 204 No Content');
+        http_response_code(204);
     } elseif ($text !== false) {
         header('Content-type: text/plain');
         print $text;
     } else {
-        header('HTTP/1.0 404 Not Found');
+        http_response_code(404);
     }
     die;
 }
@@ -92,6 +94,13 @@ $initial_mtime = note_mtime($path);
 html,
 body {
     height: 100%;
+}
+/* Shared by the editor and its hidden mirror, which must wrap text identically.
+   Padding: right keeps text clear of the action buttons (offset 30px + width 90px + gap),
+   left leaves room for the copy-block gutter. */
+:root {
+    --editor-font: 20px/1.5 monospace;
+    --editor-padding: 20px 140px 20px 56px;
 }
 body {
     margin: 0;
@@ -165,11 +174,7 @@ body {
 }
 #content {
     margin: 0;
-    padding: 20px;
-    /* Keep text clear of the action buttons (right offset 30px + width 90px + gap) */
-    padding-right: 140px;
-    /* Room for the copy-block gutter */
-    padding-left: 56px;
+    padding: var(--editor-padding);
     overflow-y: auto;
     resize: none;
     width: 100%;
@@ -182,7 +187,7 @@ body {
     border-radius: 12px;
     box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
     outline: none;
-    font: 20px/1.5 monospace;
+    font: var(--editor-font);
     transition: border-color 0.2s, box-shadow 0.2s;
 }
 #content:focus {
@@ -203,11 +208,10 @@ body {
     visibility: hidden;
     pointer-events: none;
     box-sizing: border-box;
-    padding: 20px 140px 20px 56px;
-    font: 20px/1.5 monospace;
+    padding: var(--editor-padding);
+    font: var(--editor-font);
     white-space: pre-wrap;
     overflow-wrap: break-word;
-    word-wrap: break-word;
 }
 #mirror .marker {
     display: inline-block;
@@ -373,7 +377,7 @@ if ($initial_text !== false) {
 <div id="gutter"><div id="gutter-inner"></div></div>
 <div id="mirror" aria-hidden="true"></div>
 <button id="copy-all" class="action" type="button" title="Copy all"><svg class="icon-copy" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg><svg class="icon-check" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg><small>copy all</small></button>
-<button id="refresh" class="action" type="button" title="This note changed on another device: click to load the server version"><span id="refresh-icon">⟳</span><small>refresh</small></button>
+<button id="refresh" class="action" type="button" title="This note changed on another device: click to load the server version"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg><small>refresh</small></button>
 <button id="clear" class="action" type="button" title="Clear note"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m16 22-1-4"/><path d="M19 14a1 1 0 0 0 1-1v-1a2 2 0 0 0-2-2h-3a1 1 0 0 1-1-1V4a2 2 0 0 0-4 0v5a1 1 0 0 1-1 1H6a2 2 0 0 0-2 2v1a1 1 0 0 0 1 1"/><path d="M5 14h14l1.973 6.767A1 1 0 0 1 20 22H4a1 1 0 0 1-.973-1.233z"/><path d="m8 22 1-4"/></svg><small>clear</small></button>
 </div>
 <div id="modified"><span id="tip">To upload: <code id="tip-command"></code></span><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M12 7v5l3 2"/></svg><span id="modified-time" title="Last modified"></span><span id="status"></span></div>
@@ -417,7 +421,6 @@ function applyRemote(request) {
     content = text;
     version = request.getResponseHeader('X-Note-Version') || '';
     setMtime(request.getResponseHeader('X-Note-Mtime'));
-    printable.textContent = text;
     updateStatus();
     updateGutter();
 }
@@ -430,7 +433,7 @@ function checkRemote() {
     checking = true;
     var sent = version;
     var request = new XMLHttpRequest();
-    request.open('GET', window.location.pathname + '?raw&since=' + encodeURIComponent(sent) + '&t=' + Date.now(), true);
+    request.open('GET', window.location.pathname + '?raw&since=' + encodeURIComponent(sent), true);
     request.onload = function() {
         checking = false;
 
@@ -451,45 +454,31 @@ function checkRemote() {
 function uploadContent() {
 
     // While in conflict, autosave is paused so the server copy is not overwritten.
-    if (!conflict && content !== textarea.value) {
-        var temp = textarea.value;
-        var request = new XMLHttpRequest();
-        request.open('POST', window.location.href, true);
-        request.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded; charset=UTF-8');
-        request.onload = function() {
-            saving = false;
-            if (request.status === 200) {
-                content = temp;
-                version = request.responseText;
-                setMtime(request.getResponseHeader('X-Note-Mtime'));
-                updateStatus();
-            } else if (request.status === 409) {
-
-                // The note changed on another device since it was loaded here.
-                setConflict(true);
-            }
-
-            // Check again after 1 second.
-            setTimeout(uploadContent, 1000);
-        }
-        request.onerror = function() {
-            saving = false;
-
-            // Try again after 1 second.
-            setTimeout(uploadContent, 1000);
-        }
-        saving = true;
-        request.send('text=' + encodeURIComponent(temp) + '&base=' + encodeURIComponent(version));
-
-        // Update the printable contents.
-        printable.removeChild(printable.firstChild);
-        printable.appendChild(document.createTextNode(temp));
+    if (saving || conflict || content === textarea.value) {
+        return;
     }
-    else {
+    saving = true;
+    var temp = textarea.value;
+    var request = new XMLHttpRequest();
+    request.open('POST', window.location.href, true);
+    request.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded; charset=UTF-8');
+    request.onload = function() {
+        saving = false;
+        if (request.status === 200) {
+            content = temp;
+            version = request.responseText;
+            setMtime(request.getResponseHeader('X-Note-Mtime'));
+            updateStatus();
+        } else if (request.status === 409) {
 
-        // If the content has not changed, check again after 1 second.
-        setTimeout(uploadContent, 1000);
-    }
+            // The note changed on another device since it was loaded here.
+            setConflict(true);
+        }
+    };
+    request.onerror = function() {
+        saving = false;
+    };
+    request.send('text=' + encodeURIComponent(temp) + '&base=' + encodeURIComponent(version));
 }
 
 // Blocks of text separated by blank lines, as [start, end) offsets.
@@ -647,18 +636,14 @@ var gutterInner = document.getElementById('gutter-inner');
 var mirror = document.getElementById('mirror');
 var printable = document.getElementById('printable');
 var refreshButton = document.getElementById('refresh');
-var refreshIcon = document.getElementById('refresh-icon');
 var content = textarea.value;
 var version = '<?php print $initial_version; ?>';
 var conflict = false;
 var saving = false;
 var checking = false;
 
-// Initialize the printable contents with the initial value of the textarea.
-printable.appendChild(document.createTextNode(content));
-
 textarea.focus();
-uploadContent();
+setInterval(uploadContent, 1000);
 setInterval(checkRemote, 2000);
 document.addEventListener('visibilitychange', checkRemote);
 showModified();
@@ -669,30 +654,29 @@ textarea.addEventListener('input', scheduleGutter);
 textarea.addEventListener('input', updateStatus);
 textarea.addEventListener('scroll', syncGutterScroll);
 window.addEventListener('resize', scheduleGutter);
+window.addEventListener('beforeprint', function() {
+    printable.textContent = textarea.value;
+});
 
+// Only visible while in conflict.
 refreshButton.onclick = function() {
-    if (conflict && !confirm('This note changed on another device and your latest changes here have NOT been saved.\n\nOK: discard them and load the server version.\nCancel: keep them so you can copy them first.')) {
+    if (!confirm('This note changed on another device and your latest changes here have NOT been saved.\n\nOK: discard them and load the server version.\nCancel: keep them so you can copy them first.')) {
         return;
     }
     refreshButton.disabled = true;
-    refreshIcon.textContent = '…';
-
-    function done() {
-        refreshButton.disabled = false;
-        refreshIcon.textContent = '⟳';
-    }
 
     // Load the server copy, discarding the local changes
     var request = new XMLHttpRequest();
-    request.open('GET', window.location.pathname + '?raw&t=' + Date.now(), true);
+    request.open('GET', window.location.pathname + '?raw', true);
     request.onload = function() {
         if (request.status === 200 || request.status === 404) {
             applyRemote(request);
             setConflict(false);
         }
-        done();
     };
-    request.onerror = done;
+    request.onloadend = function() {
+        refreshButton.disabled = false;
+    };
     request.send();
 };
 
@@ -707,20 +691,11 @@ clearButton.onclick = function() {
         alert('This note changed on another device. Click refresh before clearing it.');
         return;
     }
-    clearButton.disabled = true;
 
     // An empty text makes the autosave loop delete the note on the server
     textarea.value = '';
-    printable.textContent = '';
     updateStatus();
     updateGutter();
-    (function waitForClear() {
-        if (content !== '') {
-            setTimeout(waitForClear, 200);
-            return;
-        }
-        clearButton.disabled = false;
-    })();
 };
 </script>
 </body>
