@@ -5,7 +5,7 @@
 $save_path = '/var/lib/notas';
 
 // Shown in the footer next to the GitHub link. Bump it on each release.
-$app_version = '1.0';
+$app_version = '1.1';
 $repo_url = 'https://github.com/joseaguardia/web-notepad';
 
 // Attachment limits: size of each file, and total size of all attachments of all notes.
@@ -231,21 +231,33 @@ $initial_files = list_files($files_dir);
 <link rel="icon" href="favicon.ico" sizes="any">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap">
 <style>
 html,
 body {
     height: 100%;
 }
-/* Shared by the editor and its hidden mirror, which must wrap text identically.
-   Padding: right keeps text clear of the action buttons (offset 30px + width 90px + gap),
+/* Shared by the editor and its hidden mirror, which must wrap text identically
+   (#mirror .marker height must match the line height).
+   Padding: right keeps text clear of the action buttons (offset 30px + width 64px + gap),
    left leaves room for the copy-block gutter. */
 :root {
-    --editor-font: 20px/1.5 monospace;
-    --editor-padding: 20px 140px 20px 56px;
+    --mono: 'JetBrains Mono', monospace;
+    --editor-font: 17px/1.6 var(--mono);
+    --editor-padding: 20px 120px 20px 56px;
+}
+@media (max-width: 800px) {
+    :root {
+        --editor-font: 15px/1.6 var(--mono);
+        --editor-padding: 16px 104px 16px 56px;
+    }
+}
+button {
+    font-family: inherit;
 }
 body {
     margin: 0;
+    font-family: var(--mono);
     background: #004254 linear-gradient(160deg, #004d61 0%, #002f3d 100%) fixed;
 }
 .container {
@@ -264,7 +276,7 @@ body {
     align-items: center;
     justify-content: flex-end;
     gap: 8px;
-    font: 18px/24px monospace;
+    font: 16px/24px var(--mono);
     color: #E3E2DA;
     opacity: 0.6;
 }
@@ -325,7 +337,6 @@ body {
 #tip code {
     padding: 1px 6px;
     font: inherit;
-    font-family: 'JetBrains Mono', monospace;
     background: rgba(0, 0, 0, 0.25);
     border-radius: 4px;
 }
@@ -378,7 +389,7 @@ body {
 #mirror .marker {
     display: inline-block;
     width: 0;
-    height: 1.5em;
+    height: 1.6em;
     vertical-align: top;
 }
 #gutter {
@@ -460,17 +471,15 @@ body {
     align-items: center;
     justify-content: center;
     box-sizing: border-box;
-    width: 90px;
-    height: 90px;
+    width: 64px;
+    height: 64px;
     padding: 0;
-    font-size: 54px;
-    line-height: 1;
     cursor: pointer;
     --accent: 79, 209, 232;
     color: rgb(var(--accent));
     background: rgba(var(--accent), 0.08);
     border: 1px solid rgba(var(--accent), 0.35);
-    border-radius: 14px;
+    border-radius: 12px;
     box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
     backdrop-filter: blur(4px);
     transition: background 0.15s, border-color 0.15s, transform 0.15s;
@@ -485,29 +494,36 @@ body {
     cursor: default;
 }
 .action small {
-    max-height: 0;
-    margin-top: 0;
-    overflow: hidden;
-    font-size: 16px;
+    position: absolute;
+    top: 50%;
+    right: calc(100% + 10px);
+    padding: 4px 10px;
+    font-size: 14px;
     line-height: 20px;
+    white-space: nowrap;
+    color: rgb(var(--accent));
+    background: #001923;
+    border: 1px solid rgba(var(--accent), 0.35);
+    border-radius: 6px;
     opacity: 0;
-    transition: max-height 0.15s, margin-top 0.15s, opacity 0.15s;
+    pointer-events: none;
+    transform: translate(4px, -50%);
+    transition: opacity 0.15s, transform 0.15s;
 }
 .action:hover small {
-    max-height: 20px;
-    margin-top: 4px;
     opacity: 1;
+    transform: translate(0, -50%);
 }
 #copy-all {
-    bottom: 220px;
+    bottom: 128px;
     --accent: 229, 231, 235;
 }
 #refresh {
-    top: 100px;
+    top: 40px;
     display: none;
 }
 #clear {
-    bottom: 100px;
+    bottom: 40px;
     --accent: 242, 139, 150;
 }
 #refresh.conflict {
@@ -517,13 +533,13 @@ body {
     border-color: rgb(var(--accent));
 }
 #attach {
-    bottom: 340px;
+    bottom: 216px;
     --accent: 45, 212, 191;
 }
 /* Attachments panel: hidden until the first file, then splits the page about 80/20
    (side by side, or stacked on narrow screens) */
 :root {
-    --files-width: max(240px, 20%);
+    --files-width: max(280px, 20%);
     --files-height: 35%;
 }
 #files {
@@ -537,7 +553,7 @@ body {
     gap: 12px;
     box-sizing: border-box;
     padding: 14px;
-    font: 16px/22px monospace;
+    font: 15px/21px var(--mono);
     color: #E3E2DA;
     background: #001923;
     border: 1px solid rgba(79, 209, 232, 0.15);
@@ -563,7 +579,23 @@ body.has-files #files {
     }
 }
 #files-title {
-    opacity: 0.6;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: rgba(227, 226, 218, 0.6);
+}
+#files-count {
+    padding: 0 8px;
+    font-size: 12px;
+    line-height: 18px;
+    letter-spacing: 0;
+    color: rgb(45, 212, 191);
+    background: rgba(45, 212, 191, 0.12);
+    border-radius: 999px;
 }
 #files-list {
     flex: 1;
@@ -573,31 +605,42 @@ body.has-files #files {
 .file {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
     margin-bottom: 6px;
-    padding: 6px 4px 6px 10px;
+    padding: 8px 4px 8px 10px;
     background: rgba(79, 209, 232, 0.08);
     border-radius: 8px;
 }
 .file:hover {
     background: rgba(79, 209, 232, 0.15);
 }
-.file .name {
+.file-icon {
+    flex-shrink: 0;
+    opacity: 0.55;
+}
+.file .meta {
+    display: flex;
     flex: 1;
+    flex-direction: column;
     min-width: 0;
+}
+.file .name {
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
 }
 .file a {
-    color: rgb(45, 212, 191);
+    color: #E3E2DA;
     text-decoration: none;
+    transition: color 0.15s;
 }
 .file a:hover {
+    color: rgb(45, 212, 191);
     text-decoration: underline;
 }
 .file .size {
-    flex-shrink: 0;
+    font-size: 12px;
+    line-height: 18px;
     opacity: 0.5;
 }
 .file button {
@@ -607,35 +650,37 @@ body.has-files #files {
     padding: 0;
     font-size: 26px;
     line-height: 1;
-    color: #f28b96;
+    color: #E3E2DA;
     background: transparent;
     border: 0;
-    border-radius: 4px;
-    opacity: 0.6;
+    border-radius: 6px;
+    opacity: 0.35;
     cursor: pointer;
+    transition: opacity 0.15s, color 0.15s, background 0.15s;
 }
 .file button:hover {
+    color: #f28b96;
     opacity: 1;
     background: rgba(242, 139, 150, 0.15);
 }
 .file.uploading {
     opacity: 0.6;
 }
-/* Same look as the .action buttons, but full width */
+/* Outlined version of the .action buttons, full width */
 #empty {
     flex-shrink: 0;
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 8px;
-    height: 44px;
-    font: 18px monospace;
+    height: 38px;
+    font-size: 14px;
     cursor: pointer;
     --accent: 242, 139, 150;
     color: rgb(var(--accent));
-    background: rgba(var(--accent), 0.08);
-    border: 1px solid rgba(var(--accent), 0.35);
-    border-radius: 10px;
+    background: transparent;
+    border: 1px solid rgba(var(--accent), 0.3);
+    border-radius: 8px;
     transition: background 0.15s, border-color 0.15s;
 }
 #empty:disabled {
@@ -643,7 +688,7 @@ body.has-files #files {
     cursor: default;
 }
 #empty:not(:disabled):hover {
-    background: rgba(var(--accent), 0.2);
+    background: rgba(var(--accent), 0.12);
     border-color: rgba(var(--accent), 0.7);
 }
 #drop {
@@ -653,7 +698,7 @@ body.has-files #files {
     display: none;
     align-items: center;
     justify-content: center;
-    font: 28px monospace;
+    font: 26px var(--mono);
     color: #4fd1e8;
     background: rgba(0, 25, 35, 0.85);
     border: 3px dashed #4fd1e8;
@@ -685,16 +730,16 @@ if ($initial_text !== false) {
 ?></textarea>
 <div id="gutter"><div id="gutter-inner"></div></div>
 <div id="mirror" aria-hidden="true"></div>
-<button id="copy-all" class="action" type="button" title="Copy all"><svg class="icon-copy" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg><svg class="icon-check" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg><small>copy all</small></button>
-<button id="refresh" class="action" type="button" title="This note changed on another device: click to load the server version"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg><small>refresh</small></button>
-<button id="clear" class="action" type="button" title="Clear note"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m16 22-1-4"/><path d="M19 14a1 1 0 0 0 1-1v-1a2 2 0 0 0-2-2h-3a1 1 0 0 1-1-1V4a2 2 0 0 0-4 0v5a1 1 0 0 1-1 1H6a2 2 0 0 0-2 2v1a1 1 0 0 0 1 1"/><path d="M5 14h14l1.973 6.767A1 1 0 0 1 20 22H4a1 1 0 0 1-.973-1.233z"/><path d="m8 22 1-4"/></svg><small>clear</small></button>
-<button id="attach" class="action" type="button" title="Attach file (or drop files anywhere)"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg><small>attach file</small></button>
+<button id="copy-all" class="action" type="button" title="Copy all"><svg class="icon-copy" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg><svg class="icon-check" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg><small>copy all</small></button>
+<button id="refresh" class="action" type="button" title="This note changed on another device: click to load the server version"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg><small>refresh</small></button>
+<button id="clear" class="action" type="button" title="Clear note"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m16 22-1-4"/><path d="M19 14a1 1 0 0 0 1-1v-1a2 2 0 0 0-2-2h-3a1 1 0 0 1-1-1V4a2 2 0 0 0-4 0v5a1 1 0 0 1-1 1H6a2 2 0 0 0-2 2v1a1 1 0 0 0 1 1"/><path d="M5 14h14l1.973 6.767A1 1 0 0 1 20 22H4a1 1 0 0 1-.973-1.233z"/><path d="m8 22 1-4"/></svg><small>clear</small></button>
+<button id="attach" class="action" type="button" title="Attach file (or drop files anywhere)"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg><small>attach file</small></button>
 <input id="file-input" type="file" multiple hidden>
 </div>
 <div id="files">
-<div id="files-title">Files</div>
+<div id="files-title">Files <span id="files-count">0</span></div>
 <div id="files-list"></div>
-<button id="empty" type="button" title="Delete all files (the note text is kept)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>empty</button>
+<button id="empty" type="button" title="Delete all files (the note text is kept)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>empty</button>
 </div>
 <div id="drop">Drop files to attach them (max <?php print $max_file_size >> 20; ?> MB each)</div>
 <div id="modified"><span id="tip"><div>Upload text: <code id="tip-text"></code></div><div>Upload file: <code id="tip-upload"></code></div></span><a id="repo" href="<?php print $repo_url; ?>" target="_blank" rel="noopener noreferrer" title="Source code on GitHub"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.93.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.22.165.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>v<?php print $app_version; ?></a><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M12 7v5l3 2"/></svg><span id="modified-time" title="Last modified"></span><span id="status"></span></div>
@@ -933,9 +978,13 @@ function scheduleGutter() {
     }
 }
 
+// Latest change of the note text or any of its files.
 function showModified() {
-    modifiedLabel.textContent = mtime
-        ? new Date(mtime * 1000).toLocaleTimeString('en-GB', {hour: '2-digit', minute: '2-digit'})
+    var latest = files.reduce(function(max, file) {
+        return Math.max(max, file.mtime);
+    }, mtime);
+    modifiedLabel.textContent = latest
+        ? new Date(latest * 1000).toLocaleTimeString('en-GB', {hour: '2-digit', minute: '2-digit'})
         : 'Unsaved note';
 }
 
@@ -952,9 +1001,29 @@ function formatSize(bytes) {
 }
 
 // Names always go through textContent, never innerHTML.
+var FILE_ICONS = {
+    image: '<rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>',
+    text: '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/>',
+    archive: '<rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/>',
+    file: '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/>'
+};
+
+// Icon chosen by extension; only constant markup goes through innerHTML.
+function fileIcon(name) {
+    var ext = ((name.match(/\.([a-z0-9]+)$/i) || [])[1] || '').toLowerCase();
+    var kind = /^(png|jpe?g|gif|webp|svg|bmp|heic|avif)$/.test(ext) ? 'image'
+        : /^(txt|md|log|conf|cfg|ini|json|ya?ml|xml|csv|pdf|docx?|odt|sh|py|js|php|html?|css)$/.test(ext) ? 'text'
+        : /^(zip|gz|tgz|tar|7z|rar|xz|bz2)$/.test(ext) ? 'archive' : 'file';
+    return '<svg class="file-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">' + FILE_ICONS[kind] + '</svg>';
+}
+
 function fileRow(name, detail, href) {
     var row = document.createElement('div');
     row.className = 'file';
+    row.innerHTML = fileIcon(name);
+    var meta = document.createElement('div');
+    meta.className = 'meta';
+    row.appendChild(meta);
     var label = document.createElement(href ? 'a' : 'span');
     label.className = 'name';
     label.textContent = name;
@@ -963,11 +1032,11 @@ function fileRow(name, detail, href) {
         label.href = href;
         label.title = 'Download ' + name;
     }
-    row.appendChild(label);
+    meta.appendChild(label);
     var size = document.createElement('span');
     size.className = 'size';
     size.textContent = detail;
-    row.appendChild(size);
+    meta.appendChild(size);
     return row;
 }
 
@@ -990,7 +1059,8 @@ function renderFiles() {
         chip.classList.add('uploading');
         filesList.appendChild(chip);
     });
-    filesTitle.textContent = 'Files (' + files.length + ')';
+    filesCount.textContent = files.length;
+    showModified();
     emptyButton.disabled = !files.length;
 
     // Resizing the editor rewraps its text, so the copy buttons must be placed again.
@@ -1095,7 +1165,7 @@ var MAX_FILE_SIZE = <?php print $max_file_size; ?>;
 var files = <?php print json_encode($initial_files, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
 var filesVersion = '<?php print files_version($initial_files); ?>';
 var filesList = document.getElementById('files-list');
-var filesTitle = document.getElementById('files-title');
+var filesCount = document.getElementById('files-count');
 var emptyButton = document.getElementById('empty');
 var fileInput = document.getElementById('file-input');
 var uploads = [];
@@ -1144,6 +1214,10 @@ showModified();
 updateStatus();
 
 updateGutter();
+if (document.fonts) {
+    document.fonts.ready.then(scheduleGutter);
+    document.fonts.addEventListener('loadingdone', scheduleGutter);
+}
 textarea.addEventListener('input', scheduleGutter);
 textarea.addEventListener('input', updateStatus);
 textarea.addEventListener('scroll', syncGutterScroll);
