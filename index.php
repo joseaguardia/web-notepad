@@ -4,6 +4,14 @@
 // Should be outside the document root, if possible.
 $save_path = '/var/lib/notas';
 
+// Shown in the footer next to the GitHub link. Bump it on each release.
+$app_version = '1.0';
+$repo_url = 'https://github.com/joseaguardia/web-notepad';
+
+// Attachment limits: size of each file, and total size of all attachments of all notes.
+$max_file_size = 5 * 1024 * 1024;
+$max_total_size = 100 * 1024 * 1024;
+
 // Disable caching.
 header('Cache-Control: no-store');
 
@@ -28,7 +36,137 @@ function note_mtime($path) {
     return is_file($path) ? filemtime($path) : 0;
 }
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+// Attachments of a note live in "<note>.files/", which can never clash with a note name (no dots allowed).
+// Stored names are restricted to a safe charset and can never start with a dot (temp files do).
+function valid_file_name($name) {
+    return is_string($name) && preg_match('/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$/', $name);
+}
+
+function sanitize_file_name($name) {
+    $name = preg_replace('/^.*[\/\\\\]/', '', (string) $name);
+    $name = ltrim(substr(preg_replace('/[^a-zA-Z0-9._-]+/', '_', $name), -100), '._-');
+    return valid_file_name($name) ? $name : 'file';
+}
+
+function list_files($dir) {
+    $files = [];
+    foreach (is_dir($dir) ? scandir($dir) : [] as $name) {
+        if (valid_file_name($name) && is_file("$dir/$name")) {
+            $files[] = ['name' => $name, 'size' => filesize("$dir/$name"), 'mtime' => filemtime("$dir/$name")];
+        }
+    }
+    return $files;
+}
+
+function files_version($files) {
+    return $files ? md5(json_encode($files)) : '';
+}
+
+function send_files($dir) {
+    $files = list_files($dir);
+    header('Content-Type: application/json');
+    print json_encode(['version' => files_version($files), 'files' => $files]);
+    die;
+}
+
+function fail($code, $message) {
+    http_response_code($code);
+    header('Content-Type: text/plain');
+    print $message;
+    die;
+}
+
+$files_dir = $path . '.files';
+$method = $_SERVER['REQUEST_METHOD'];
+
+// Upload an attachment: the raw request body is the file, e.g. curl --upload-file photo.png '<url>?upload=photo.png'.
+// file_uploads is disabled in PHP on purpose, so no multipart parsing is involved.
+if (isset($_GET['upload']) && ($method === 'POST' || $method === 'PUT')) {
+    $length = $_SERVER['CONTENT_LENGTH'] ?? '';
+    if ($length !== '' && (int) $length > $max_file_size) {
+        fail(413, 'File too large (max ' . ($max_file_size >> 20) . ' MB)');
+    }
+    if (!is_dir($files_dir) && !@mkdir($files_dir, 0755) && !is_dir($files_dir)) {
+        fail(500, 'Cannot create attachments directory');
+    }
+    $name = sanitize_file_name($_GET['upload']);
+
+    // Stream to a hidden temp file first, without holding the lock, so a slow upload never blocks note saves.
+    $temp = $files_dir . '/.' . bin2hex(random_bytes(8)) . '.tmp';
+    register_shutdown_function(function() use ($temp) {
+        if (is_file($temp)) {
+            unlink($temp);
+        }
+    });
+    $in = fopen('php://input', 'rb');
+    $out = fopen($temp, 'xb');
+    $copied = stream_copy_to_stream($in, $out, $max_file_size + 1);
+    fclose($out);
+    if ($copied > $max_file_size) {
+        fail(413, 'File too large (max ' . ($max_file_size >> 20) . ' MB)');
+    }
+    if ($copied === 0 || $copied === false) {
+        fail(400, 'Empty file');
+    }
+    if ($length !== '' && $copied !== (int) $length) {
+        fail(400, 'Incomplete upload');
+    }
+
+    $lock = fopen($save_path . '/.lock', 'c');
+    flock($lock, LOCK_EX);
+    $target = "$files_dir/$name";
+    $total = 0;
+    foreach (glob($save_path . '/*.files/*') ?: [] as $file) {
+        if ($file !== $target) {
+            $total += filesize($file);
+        }
+    }
+    if ($total + $copied > $max_total_size) {
+        fail(507, 'Attachment storage full (max ' . ($max_total_size >> 20) . ' MB in total)');
+    }
+    rename($temp, $target);
+    send_files($files_dir);
+}
+
+// Delete one attachment, or all of them with ?empty.
+if ((isset($_GET['delete']) || isset($_GET['empty'])) && $method === 'POST') {
+    $lock = fopen($save_path . '/.lock', 'c');
+    flock($lock, LOCK_EX);
+    if (isset($_GET['empty'])) {
+        foreach (list_files($files_dir) as $file) {
+            unlink("$files_dir/{$file['name']}");
+        }
+    } elseif (valid_file_name($_GET['delete']) && is_file("$files_dir/{$_GET['delete']}")) {
+        unlink("$files_dir/{$_GET['delete']}");
+    }
+    @rmdir($files_dir);
+    send_files($files_dir);
+}
+
+// Download an attachment. Always as a download and sandboxed, so an uploaded HTML or SVG can never run in this origin.
+if (isset($_GET['file'])) {
+    if (!valid_file_name($_GET['file']) || !is_file($file = "$files_dir/{$_GET['file']}")) {
+        fail(404, 'Not found');
+    }
+    header('Content-Type: application/octet-stream');
+    header('Content-Disposition: attachment; filename="' . $_GET['file'] . '"');
+    header('Content-Length: ' . filesize($file));
+    header('X-Content-Type-Options: nosniff');
+    header("Content-Security-Policy: default-src 'none'; sandbox");
+    readfile($file);
+    die;
+}
+
+// List of attachments as JSON. With since=<version> answers 204 when unchanged (used by the browser's polling).
+if (isset($_GET['files'])) {
+    if (isset($_GET['since']) && $_GET['since'] === files_version(list_files($files_dir))) {
+        http_response_code(204);
+        die;
+    }
+    send_files($files_dir);
+}
+
+if ($method === 'POST') {
     $text = $_POST['text'] ?? file_get_contents('php://input');
 
     // Serialize the version check and the write across concurrent requests.
@@ -83,6 +221,7 @@ if (isset($_GET['raw']) || strpos($agent, 'curl') === 0 || strpos($agent, 'Wget'
 $initial_text = is_file($path) ? file_get_contents($path) : false;
 $initial_version = $initial_text === false ? '' : md5($initial_text);
 $initial_mtime = note_mtime($path);
+$initial_files = list_files($files_dir);
 ?><!DOCTYPE html>
 <html>
 <head>
@@ -90,6 +229,9 @@ $initial_mtime = note_mtime($path);
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title><?php print $_GET['note']; ?></title>
 <link rel="icon" href="favicon.ico" sizes="any">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400&display=swap">
 <style>
 html,
 body {
@@ -110,13 +252,13 @@ body {
     position: absolute;
     top: 20px;
     right: 20px;
-    bottom: 48px;
+    bottom: 68px;
     left: 20px;
 }
 #modified {
     position: absolute;
     right: 20px;
-    bottom: 14px;
+    bottom: 12px;
     left: 20px;
     display: flex;
     align-items: center;
@@ -128,6 +270,19 @@ body {
 }
 #modified svg {
     flex-shrink: 0;
+}
+#repo {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    gap: 6px;
+    margin-right: 16px;
+    color: inherit;
+    text-decoration: none;
+    transition: color 0.15s;
+}
+#repo:hover {
+    color: #4fd1e8;
 }
 #status {
     flex-shrink: 0;
@@ -155,8 +310,14 @@ body {
     }
 }
 #tip {
+    display: flex;
+    flex-direction: column;
     margin-right: auto;
     min-width: 0;
+    font-size: 15px;
+    line-height: 22px;
+}
+#tip div {
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
@@ -164,6 +325,7 @@ body {
 #tip code {
     padding: 1px 6px;
     font: inherit;
+    font-family: 'JetBrains Mono', monospace;
     background: rgba(0, 0, 0, 0.25);
     border-radius: 4px;
 }
@@ -338,7 +500,7 @@ body {
 }
 #copy-all {
     bottom: 220px;
-    --accent: 181, 224, 122;
+    --accent: 229, 231, 235;
 }
 #refresh {
     top: 100px;
@@ -354,8 +516,155 @@ body {
     background: rgba(var(--accent), 0.25);
     border-color: rgb(var(--accent));
 }
+#attach {
+    bottom: 340px;
+    --accent: 45, 212, 191;
+}
+/* Attachments panel: hidden until the first file, then splits the page about 80/20
+   (side by side, or stacked on narrow screens) */
+:root {
+    --files-width: max(240px, 20%);
+    --files-height: 35%;
+}
+#files {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    bottom: 68px;
+    width: calc(var(--files-width) - 20px);
+    display: none;
+    flex-direction: column;
+    gap: 12px;
+    box-sizing: border-box;
+    padding: 14px;
+    font: 16px/22px monospace;
+    color: #E3E2DA;
+    background: #001923;
+    border: 1px solid rgba(79, 209, 232, 0.15);
+    border-radius: 12px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+}
+body.has-files .container {
+    right: calc(var(--files-width) + 16px);
+}
+body.has-files #files {
+    display: flex;
+}
+@media (max-width: 800px) {
+    #files {
+        top: auto;
+        left: 20px;
+        width: auto;
+        height: var(--files-height);
+    }
+    body.has-files .container {
+        right: 20px;
+        bottom: calc(var(--files-height) + 84px);
+    }
+}
+#files-title {
+    opacity: 0.6;
+}
+#files-list {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+}
+.file {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+    padding: 6px 4px 6px 10px;
+    background: rgba(79, 209, 232, 0.08);
+    border-radius: 8px;
+}
+.file:hover {
+    background: rgba(79, 209, 232, 0.15);
+}
+.file .name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+.file a {
+    color: rgb(45, 212, 191);
+    text-decoration: none;
+}
+.file a:hover {
+    text-decoration: underline;
+}
+.file .size {
+    flex-shrink: 0;
+    opacity: 0.5;
+}
+.file button {
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    font-size: 26px;
+    line-height: 1;
+    color: #f28b96;
+    background: transparent;
+    border: 0;
+    border-radius: 4px;
+    opacity: 0.6;
+    cursor: pointer;
+}
+.file button:hover {
+    opacity: 1;
+    background: rgba(242, 139, 150, 0.15);
+}
+.file.uploading {
+    opacity: 0.6;
+}
+/* Same look as the .action buttons, but full width */
+#empty {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    height: 44px;
+    font: 18px monospace;
+    cursor: pointer;
+    --accent: 242, 139, 150;
+    color: rgb(var(--accent));
+    background: rgba(var(--accent), 0.08);
+    border: 1px solid rgba(var(--accent), 0.35);
+    border-radius: 10px;
+    transition: background 0.15s, border-color 0.15s;
+}
+#empty:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+#empty:not(:disabled):hover {
+    background: rgba(var(--accent), 0.2);
+    border-color: rgba(var(--accent), 0.7);
+}
+#drop {
+    position: fixed;
+    inset: 0;
+    z-index: 10;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    font: 28px monospace;
+    color: #4fd1e8;
+    background: rgba(0, 25, 35, 0.85);
+    border: 3px dashed #4fd1e8;
+    border-radius: 12px;
+}
+body.dragging #drop {
+    display: flex;
+}
 @media print {
     .container,
+    #files,
     #modified {
         display: none;
     }
@@ -379,8 +688,16 @@ if ($initial_text !== false) {
 <button id="copy-all" class="action" type="button" title="Copy all"><svg class="icon-copy" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg><svg class="icon-check" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg><small>copy all</small></button>
 <button id="refresh" class="action" type="button" title="This note changed on another device: click to load the server version"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg><small>refresh</small></button>
 <button id="clear" class="action" type="button" title="Clear note"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m16 22-1-4"/><path d="M19 14a1 1 0 0 0 1-1v-1a2 2 0 0 0-2-2h-3a1 1 0 0 1-1-1V4a2 2 0 0 0-4 0v5a1 1 0 0 1-1 1H6a2 2 0 0 0-2 2v1a1 1 0 0 0 1 1"/><path d="M5 14h14l1.973 6.767A1 1 0 0 1 20 22H4a1 1 0 0 1-.973-1.233z"/><path d="m8 22 1-4"/></svg><small>clear</small></button>
+<button id="attach" class="action" type="button" title="Attach file (or drop files anywhere)"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg><small>attach file</small></button>
+<input id="file-input" type="file" multiple hidden>
 </div>
-<div id="modified"><span id="tip">To upload: <code id="tip-command"></code></span><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M12 7v5l3 2"/></svg><span id="modified-time" title="Last modified"></span><span id="status"></span></div>
+<div id="files">
+<div id="files-title">Files</div>
+<div id="files-list"></div>
+<button id="empty" type="button" title="Delete all files (the note text is kept)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>empty</button>
+</div>
+<div id="drop">Drop files to attach them (max <?php print $max_file_size >> 20; ?> MB each)</div>
+<div id="modified"><span id="tip"><div>Upload text: <code id="tip-text"></code></div><div>Upload file: <code id="tip-upload"></code></div></span><a id="repo" href="<?php print $repo_url; ?>" target="_blank" rel="noopener noreferrer" title="Source code on GitHub"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.93.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.22.165.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>v<?php print $app_version; ?></a><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M12 7v5l3 2"/></svg><span id="modified-time" title="Last modified"></span><span id="status"></span></div>
 <pre id="printable"></pre>
 <script>
 function updateStatus() {
@@ -627,10 +944,143 @@ function setMtime(header) {
     showModified();
 }
 
+function formatSize(bytes) {
+    if (bytes < 1024) {
+        return bytes + ' B';
+    }
+    return bytes < 1048576 ? Math.round(bytes / 1024) + ' KB' : (bytes / 1048576).toFixed(1) + ' MB';
+}
+
+// Names always go through textContent, never innerHTML.
+function fileRow(name, detail, href) {
+    var row = document.createElement('div');
+    row.className = 'file';
+    var label = document.createElement(href ? 'a' : 'span');
+    label.className = 'name';
+    label.textContent = name;
+    label.title = name;
+    if (href) {
+        label.href = href;
+        label.title = 'Download ' + name;
+    }
+    row.appendChild(label);
+    var size = document.createElement('span');
+    size.className = 'size';
+    size.textContent = detail;
+    row.appendChild(size);
+    return row;
+}
+
+function renderFiles() {
+    filesList.textContent = '';
+    files.forEach(function(file) {
+        var chip = fileRow(file.name, formatSize(file.size), window.location.pathname + '?file=' + encodeURIComponent(file.name));
+        var remove = document.createElement('button');
+        remove.type = 'button';
+        remove.title = 'Delete file';
+        remove.textContent = '×';
+        remove.onclick = function() {
+            fileRequest('POST', '?delete=' + encodeURIComponent(file.name));
+        };
+        chip.appendChild(remove);
+        filesList.appendChild(chip);
+    });
+    uploads.forEach(function(upload) {
+        var chip = fileRow(upload.file.name, upload.progress + '%');
+        chip.classList.add('uploading');
+        filesList.appendChild(chip);
+    });
+    filesTitle.textContent = 'Files (' + files.length + ')';
+    emptyButton.disabled = !files.length;
+
+    // Resizing the editor rewraps its text, so the copy buttons must be placed again.
+    var hasFiles = files.length + uploads.length > 0;
+    if (hasFiles !== document.body.classList.contains('has-files')) {
+        document.body.classList.toggle('has-files', hasFiles);
+        scheduleGutter();
+    }
+}
+
+function applyFiles(request) {
+    var data = JSON.parse(request.responseText);
+    files = data.files;
+    filesVersion = data.version;
+    renderFiles();
+}
+
+// Request answered with the attachment list (delete, or poll for changes from other devices).
+function fileRequest(method, query) {
+    var request = new XMLHttpRequest();
+    request.open(method, window.location.pathname + query, true);
+    request.onload = function() {
+        if (request.status === 200) {
+            applyFiles(request);
+        }
+    };
+    request.send();
+    return request;
+}
+
+function checkFiles() {
+    if (checkingFiles || document.hidden) {
+        return;
+    }
+    checkingFiles = true;
+    fileRequest('GET', '?files&since=' + encodeURIComponent(filesVersion)).onloadend = function() {
+        checkingFiles = false;
+    };
+}
+
+// Upload queued files one at a time.
+function nextUpload() {
+    var upload = uploads[0];
+    if (!upload || upload.request) {
+        return;
+    }
+    var request = upload.request = new XMLHttpRequest();
+    request.open('POST', window.location.pathname + '?upload=' + encodeURIComponent(upload.file.name), true);
+    request.setRequestHeader('Content-Type', 'application/octet-stream');
+    request.upload.onprogress = function(e) {
+        if (e.lengthComputable) {
+            upload.progress = Math.round(e.loaded * 100 / e.total);
+            renderFiles();
+        }
+    };
+    request.onloadend = function() {
+        uploads.shift();
+        if (request.status === 200) {
+            applyFiles(request);
+        } else {
+            renderFiles();
+            alert('Could not upload ' + upload.file.name + ': ' + (request.responseText || 'network error'));
+        }
+        nextUpload();
+    };
+    request.send(upload.file);
+}
+
+function uploadFiles(list) {
+    Array.prototype.forEach.call(list, function(file) {
+        if (file.size > MAX_FILE_SIZE) {
+            alert(file.name + ' is too large (max ' + formatSize(MAX_FILE_SIZE) + ').');
+        } else {
+            uploads.push({file: file, progress: 0});
+        }
+    });
+    renderFiles();
+    nextUpload();
+}
+
+function isFileDrag(e) {
+    return e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types, 'Files') !== -1;
+}
+
 var textarea = document.getElementById('content');
 var modifiedLabel = document.getElementById('modified-time');
 var statusDot = document.getElementById('status');
-document.getElementById('tip-command').textContent = '<command> | curl --data-binary @- ' + window.location.origin + window.location.pathname;
+var noteUrl = window.location.origin + window.location.pathname;
+document.getElementById('tip-text').textContent = '<command> | curl --data-binary @- ' + noteUrl;
+document.getElementById('tip-upload').textContent = "curl -T <file> '" + noteUrl + "?upload=<name>'";
 var mtime = <?php print $initial_mtime; ?>;
 var gutterInner = document.getElementById('gutter-inner');
 var mirror = document.getElementById('mirror');
@@ -641,11 +1091,55 @@ var version = '<?php print $initial_version; ?>';
 var conflict = false;
 var saving = false;
 var checking = false;
+var MAX_FILE_SIZE = <?php print $max_file_size; ?>;
+var files = <?php print json_encode($initial_files, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+var filesVersion = '<?php print files_version($initial_files); ?>';
+var filesList = document.getElementById('files-list');
+var filesTitle = document.getElementById('files-title');
+var emptyButton = document.getElementById('empty');
+var fileInput = document.getElementById('file-input');
+var uploads = [];
+var checkingFiles = false;
 
 textarea.focus();
 setInterval(uploadContent, 1000);
 setInterval(checkRemote, 2000);
+setInterval(checkFiles, 2000);
 document.addEventListener('visibilitychange', checkRemote);
+document.addEventListener('visibilitychange', checkFiles);
+renderFiles();
+
+// Dragging files anywhere shows a full-page drop zone; text drags inside the editor are left alone.
+document.addEventListener('dragenter', function(e) {
+    if (isFileDrag(e)) {
+        document.body.classList.add('dragging');
+    }
+});
+document.addEventListener('dragover', function(e) {
+    if (isFileDrag(e)) {
+        e.preventDefault();
+    }
+});
+document.getElementById('attach').onclick = function() {
+    fileInput.click();
+};
+fileInput.onchange = function() {
+    uploadFiles(fileInput.files);
+    fileInput.value = '';
+};
+emptyButton.onclick = function() {
+    fileRequest('POST', '?empty');
+};
+document.getElementById('drop').addEventListener('dragleave', function() {
+    document.body.classList.remove('dragging');
+});
+document.addEventListener('drop', function(e) {
+    if (isFileDrag(e)) {
+        e.preventDefault();
+        document.body.classList.remove('dragging');
+        uploadFiles(e.dataTransfer.files);
+    }
+});
 showModified();
 updateStatus();
 
