@@ -16,7 +16,7 @@ Fork of [pereorga/minimalist-web-notepad](https://github.com/pereorga/minimalist
   - **copy all**: copies the whole note to the clipboard.
   - **clear**: empties the note (and deletes it on the server) without asking.
 - **Copy by block**: every block of text separated by a blank line gets an icon on the left that copies it to the clipboard; hovering it highlights the block.
-- **Footer** with a **commands help** button that shows, on hover or click, the commands to upload text, upload a file and download a file for the current note, each with a copy button; plus a link to this repository with the app version, and the last saved time.
+- **Footer** with a **commands help** button that shows, on hover or click, the commands to upload text, upload a file and download a file for the current note, each with a copy button; plus a link to this repository with the app version, the last saved time and a trash icon with a bar that empties as the note approaches its deletion for not being changed (both turn pink in the last 10 minutes; the minutes left are in its tooltip).
 - **Per-file buttons** in the Files panel: download the file, or copy its `curl` download command.
 - **Light and dark themes** based on the brand palette: follows the browser preference, with a sun/moon button in the footer to switch it (remembered per browser). Also a larger font.
 - **Docker image and Kubernetes manifests**: non-root, read-only container, configured with environment variables.
@@ -50,6 +50,9 @@ Settings are environment variables (in `docker-compose.yml`, or `--env` with `do
 |---|---|---|
 | `MAX_FILE_SIZE_MB` | `5` | Maximum size of each attachment |
 | `MAX_TOTAL_SIZE_MB` | `100` | Maximum size of all attachments of all notes together |
+| `MAX_NOTE_SIZE_MB` | `2` | Maximum size of the text of each note |
+| `MAX_NOTES` | `25` | Maximum number of notes at the same time (with text or attachments); new ones are refused with 507 |
+| `NOTE_TTL_MINUTES` | `45` | Notes not changed (text saved, attachment added or deleted) for this many minutes are deleted; `0` disables it |
 | `PHP_POST_MAX_SIZE` | `8M` | PHP request body limit: keep it a bit larger than `MAX_FILE_SIZE_MB` |
 | `NOTES_PATH` | `/var/lib/notas` | Directory for notes and attachments |
 
@@ -59,7 +62,7 @@ Useful commands:
 - Update after pulling changes: `docker compose up --detach --build`
 - Stop (notes are kept in the volume): `docker compose down`; add `--volumes` to delete the notes too.
 
-Nothing is deleted automatically. For temporary notes, add a cron job on the host, e.g. `0 19 * * * docker exec web-notepad find /var/lib/notas -mindepth 1 -delete`.
+Notes not changed for 45 minutes are deleted automatically (`NOTE_TTL_MINUTES`; the check runs on incoming requests, at most once a minute). To also empty everything at a fixed time, add a cron job on the host, e.g. `0 19 * * * docker exec web-notepad find /var/lib/notas -mindepth 1 -delete`.
 
 Behind a reverse proxy, allow request bodies a bit larger than `MAX_FILE_SIZE_MB` (e.g. `client_max_body_size 8m;` in Nginx).
 
@@ -79,7 +82,7 @@ The manifests in `deploy/k8s/` use kustomize (built into `kubectl`) and target i
 1. Build the image and push it to your registry:
 
    ```
-   docker build --pull --tag registry.example.com/web-notepad:1.5 . && docker push registry.example.com/web-notepad:1.5
+   docker build --pull --tag registry.example.com/web-notepad:1.6 . && docker push registry.example.com/web-notepad:1.6
    ```
 
 2. Set the image in `kustomization.yaml` (`images`), the host in `ingress.yaml` (plus TLS if needed) and, optionally, the storage size in `pvc.yaml` and the limits in the `env` of `deployment.yaml`.
@@ -118,7 +121,7 @@ location ~* ^/notes/(?<note>[a-zA-Z0-9_-]+)/(?<file>[^/]+)$ {
 
 ### Attachment settings
 
-The limits are at the top of `index.php`: `$max_file_size` (5 MB per file) and `$max_total_size` (100 MB for all the attachments of all notes together).
+The limits are at the top of `index.php`: `$max_file_size` (5 MB per file), `$max_total_size` (100 MB for all the attachments of all notes together) and `$max_note_size` (2 MB for the text of each note).
 
 Files are sent as the raw request body, so PHP's `file_uploads` can stay disabled. The web server and PHP must still accept request bodies a bit larger than `$max_file_size`:
 
@@ -129,7 +132,7 @@ Files are sent as the raw request body, so PHP's `file_uploads` can stay disable
 
 - Attachments are only served through `index.php`, always as a download (`Content-Disposition: attachment`) with `X-Content-Type-Options: nosniff` and a sandboxing `Content-Security-Policy`, so an uploaded HTML or SVG file can never run scripts on your domain.
 - File names are reduced to `[a-zA-Z0-9._-]`, so paths like `../../etc/passwd` end up as a plain file name inside the note's directory.
-- There is no authentication: anyone who knows a note's URL can read it and upload files to it. Keep `$max_total_size` low and consider deleting notes periodically, e.g. with a daily cron job: `find /var/lib/notas -mindepth 1 -delete`.
+- There is no authentication: anyone who knows a note's URL can read it and upload files to it. Keep `$max_total_size`, `$max_note_size` and `$max_notes` low and consider deleting notes periodically, e.g. with a daily cron job: `find /var/lib/notas -mindepth 1 -delete`.
 
 ## Command-line usage
 

@@ -7,21 +7,39 @@
 $save_path = rtrim(getenv('NOTES_PATH') ?: '/var/lib/notas', '/');
 
 // Shown in the footer next to the GitHub link. Bump it on each release.
-$app_version = '1.5';
+$app_version = '1.6';
 $repo_url = 'https://github.com/joseaguardia/web-notepad';
 
 // Attachment limits: size of each file, and total size of all attachments of all notes.
 $max_file_size = (int) (getenv('MAX_FILE_SIZE_MB') ?: 5) * 1024 * 1024;
 $max_total_size = (int) (getenv('MAX_TOTAL_SIZE_MB') ?: 100) * 1024 * 1024;
 
-// Disable caching.
+// Maximum size of each note's text (notes are not counted in $max_total_size),
+// and maximum number of notes at the same time (a note exists if it has text or attachments).
+$max_note_size = (int) (getenv('MAX_NOTE_SIZE_MB') ?: 2) * 1024 * 1024;
+$max_notes = (int) (getenv('MAX_NOTES') ?: 25);
+
+// Notes not changed (text saved, attachment added or deleted) for this many minutes are deleted; 0 disables it.
+$ttl_env = getenv('NOTE_TTL_MINUTES');
+$note_ttl = ($ttl_env === false || $ttl_env === '' ? 45 : (int) $ttl_env) * 60;
+
+// Disable caching. The note URL is its only secret, so never send it as a referrer.
 header('Cache-Control: no-store');
+header('X-Content-Type-Options: nosniff');
+header('Referrer-Policy: no-referrer');
+header("Content-Security-Policy: frame-ancestors 'self'");
 
 // If no note name is provided, or if the name is too long, or if it contains invalid characters.
-if (!isset($_GET['note']) || strlen($_GET['note']) > 64 || !preg_match('/^[a-zA-Z0-9_-]+$/', $_GET['note'])) {
+// The D modifier stops $ from accepting a trailing newline.
+if (!is_string($_GET['note'] ?? null) || !preg_match('/^[a-zA-Z0-9_-]{1,64}$/D', $_GET['note'])) {
 
     // Generate a name with 5 random unambiguous characters. Redirect to it.
-    header("Location: " . substr(str_shuffle('234579abcdefghjkmnpqrstwxyz'), -5));
+    $chars = '234579abcdefghjkmnpqrstwxyz';
+    $name = '';
+    for ($i = 0; $i < 5; $i++) {
+        $name .= $chars[random_int(0, strlen($chars) - 1)];
+    }
+    header("Location: $name");
     die;
 }
 
@@ -41,7 +59,7 @@ function note_mtime($path) {
 // Attachments of a note live in "<note>.files/", which can never clash with a note name (no dots allowed).
 // Stored names are restricted to a safe charset and can never start with a dot (temp files do).
 function valid_file_name($name) {
-    return is_string($name) && preg_match('/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$/', $name);
+    return is_string($name) && preg_match('/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$/D', $name);
 }
 
 function sanitize_file_name($name) {
@@ -64,11 +82,66 @@ function files_version($files) {
     return $files ? md5(json_encode($files)) : '';
 }
 
+// Last change of the attachments directory (upload or delete), which counts for the note expiry.
+function files_changed($dir) {
+    clearstatcache(true, $dir);
+    return is_dir($dir) ? filemtime($dir) : 0;
+}
+
 function send_files($dir) {
     $files = list_files($dir);
     header('Content-Type: application/json');
-    print json_encode(['version' => files_version($files), 'files' => $files]);
+    print json_encode(['version' => files_version($files), 'files' => $files, 'changed' => files_changed($dir)]);
     die;
+}
+
+// Names of the existing notes: those with a text file, attachments, or both.
+function note_names($save_path) {
+    $names = [];
+    foreach (scandir($save_path) ?: [] as $entry) {
+        if (preg_match('/^([a-zA-Z0-9_-]+)(\.files)?$/D', $entry, $match)) {
+            $names[$match[1]] = true;
+        }
+    }
+    return $names;
+}
+
+// Refuse to create a new note when the limit is reached; existing notes can always be changed.
+function check_note_limit($save_path, $note, $max_notes) {
+    $names = note_names($save_path);
+    if (!isset($names[$note]) && count($names) >= $max_notes) {
+        fail(507, "Too many notes (max $max_notes at the same time)");
+    }
+}
+
+// Delete the notes not changed for $ttl seconds, text and attachments. Runs at most once a minute.
+// A note's last change is the newest mtime of its text file and its attachments directory
+// (the directory changes on every upload, delete, and when an upload starts its temp file).
+function delete_expired_notes($save_path, $ttl) {
+    $stamp = "$save_path/.cleanup";
+    clearstatcache();
+    if (is_file($stamp) && filemtime($stamp) > time() - 60) {
+        return;
+    }
+    touch($stamp);
+    $lock = fopen($save_path . '/.lock', 'c');
+    flock($lock, LOCK_EX);
+    foreach (array_keys(note_names($save_path)) as $name) {
+        $text = "$save_path/$name";
+        $dir = "$text.files";
+        $changed = max(is_file($text) ? filemtime($text) : 0, is_dir($dir) ? filemtime($dir) : 0);
+        if ($changed && $changed < time() - $ttl) {
+            if (is_file($text)) {
+                unlink($text);
+            }
+            foreach (list_files($dir) as $file) {
+                unlink("$dir/{$file['name']}");
+            }
+            @rmdir($dir);
+        }
+    }
+    flock($lock, LOCK_UN);
+    fclose($lock);
 }
 
 function fail($code, $message) {
@@ -81,25 +154,39 @@ function fail($code, $message) {
 $files_dir = $path . '.files';
 $method = $_SERVER['REQUEST_METHOD'];
 
+if ($note_ttl > 0) {
+    delete_expired_notes($save_path, $note_ttl);
+}
+
 // Upload an attachment: the raw request body is the file, e.g. curl --upload-file photo.png '<url>?upload=photo.png'.
 // The rewrite also maps PUT/POST <url>/<file> here, so curl --upload-file photo.png <url>/ names it automatically
 // (and GET <url>/<file> to ?file=<file>, the download below).
 // file_uploads is disabled in PHP on purpose, so no multipart parsing is involved.
 if (isset($_GET['upload']) && ($method === 'POST' || $method === 'PUT')) {
+    if (!is_string($_GET['upload'])) {
+        fail(400, 'Invalid file name');
+    }
     $length = $_SERVER['CONTENT_LENGTH'] ?? '';
     if ($length !== '' && (int) $length > $max_file_size) {
         fail(413, 'File too large (max ' . ($max_file_size >> 20) . ' MB)');
     }
+    // Check the note limit and create the directory under the lock, then release it.
+    $lock = fopen($save_path . '/.lock', 'c');
+    flock($lock, LOCK_EX);
+    check_note_limit($save_path, $_GET['note'], $max_notes);
     if (!is_dir($files_dir) && !@mkdir($files_dir, 0755) && !is_dir($files_dir)) {
         fail(500, 'Cannot create attachments directory');
     }
+    flock($lock, LOCK_UN);
     $name = sanitize_file_name($_GET['upload']);
 
     // Stream to a hidden temp file first, without holding the lock, so a slow upload never blocks note saves.
+    // On failure, also remove the directory if it was left empty, so it does not count as a note.
     $temp = $files_dir . '/.' . bin2hex(random_bytes(8)) . '.tmp';
-    register_shutdown_function(function() use ($temp) {
+    register_shutdown_function(function() use ($temp, $files_dir) {
         if (is_file($temp)) {
             unlink($temp);
+            @rmdir($files_dir);
         }
     });
     $in = fopen('php://input', 'rb');
@@ -172,6 +259,12 @@ if (isset($_GET['files'])) {
 
 if ($method === 'POST') {
     $text = $_POST['text'] ?? file_get_contents('php://input');
+    if (!is_string($text)) {
+        fail(400, 'Invalid text');
+    }
+    if (strlen($text) > $max_note_size) {
+        fail(413, 'Note too large (max ' . ($max_note_size >> 20) . ' MB)');
+    }
 
     // Serialize the version check and the write across concurrent requests.
     $lock = fopen($save_path . '/.lock', 'c');
@@ -187,6 +280,9 @@ if ($method === 'POST') {
     // Write to a temp file and rename it, so readers never see a half-written note.
     // An empty text deletes the note.
     if (strlen($text)) {
+        if (!is_file($path)) {
+            check_note_limit($save_path, $_GET['note'], $max_notes);
+        }
         file_put_contents($path . '.tmp', $text);
         rename($path . '.tmp', $path);
     } elseif (is_file($path)) {
@@ -231,7 +327,7 @@ $initial_files = list_files($files_dir);
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title><?php print $_GET['note']; ?></title>
+<title><?php print htmlspecialchars($_GET['note'], ENT_QUOTES, 'UTF-8'); ?></title>
 <link rel="icon" href="favicon.ico" sizes="any">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -335,7 +431,7 @@ body {
     color: rgb(var(--text));
 }
 /* Dimmed per child rather than on #modified, so the commands popover stays opaque */
-#modified > :not(#cli),
+#modified > :not(#cli):not(#expires),
 #cli-toggle {
     opacity: 0.6;
 }
@@ -374,6 +470,44 @@ body {
 #cli.open #cli-toggle {
     color: rgb(var(--primary));
 }
+/* Time left until the note is deleted for not being changed */
+#expires {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    gap: 4px;
+    margin-left: 8px;
+    transition: color 0.3s;
+}
+#expires[hidden] {
+    display: none;
+}
+/* Dimmed through its color rather than opacity, so it can turn full pink (clear button's color) near the end */
+#expires svg {
+    color: rgba(var(--text), 0.6);
+    transition: color 0.3s;
+}
+#expires.soon svg {
+    color: rgb(var(--danger));
+}
+/* Remaining time as a bar that empties from full (just changed) to nothing (deleted) */
+#expires-bar {
+    width: 96px;
+    height: 6px;
+    overflow: hidden;
+    background: rgba(var(--text), 0.15);
+    border-radius: 3px;
+}
+#expires-fill {
+    display: block;
+    height: 100%;
+    background: rgba(var(--text), 0.6);
+    border-radius: inherit;
+    transition: width 1s linear, background 0.3s;
+}
+#expires.soon #expires-fill {
+    background: rgb(var(--danger));
+}
 #status {
     flex-shrink: 0;
     width: 10px;
@@ -391,7 +525,8 @@ body {
     color: rgb(var(--warn));
     animation: pulse 1s ease-in-out infinite alternate;
 }
-#status.conflict {
+#status.conflict,
+#status.error {
     color: rgb(var(--danger));
 }
 @keyframes pulse {
@@ -909,13 +1044,24 @@ if ($initial_text !== false) {
 <button id="empty" type="button" title="Delete all files (the note text is kept)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>empty</button>
 </div>
 <div id="drop">Drop files to attach them (max <?php print $max_file_size >> 20; ?> MB each)</div>
-<div id="modified"><div id="cli"><div id="cli-panel"><div id="cli-list"></div></div><button id="cli-toggle" type="button" aria-expanded="false" title="Command-line usage"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></svg>commands help</button></div><button id="theme" type="button" title="Switch light/dark theme"><svg class="icon-sun" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg><svg class="icon-moon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg></button><a id="repo" href="<?php print $repo_url; ?>" target="_blank" rel="noopener noreferrer" title="Source code on GitHub"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.93.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.22.165.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>v<?php print $app_version; ?></a><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M12 7v5l3 2"/></svg><span id="modified-time" title="Last modified"></span><span id="status"></span></div>
+<div id="modified"><div id="cli"><div id="cli-panel"><div id="cli-list"></div></div><button id="cli-toggle" type="button" aria-expanded="false" title="Command-line usage"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></svg>commands help</button></div><button id="theme" type="button" title="Switch light/dark theme"><svg class="icon-sun" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg><svg class="icon-moon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg></button><a id="repo" href="<?php print $repo_url; ?>" target="_blank" rel="noopener noreferrer" title="Source code on GitHub"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.93.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.22.165.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>v<?php print $app_version; ?></a><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M12 7v5l3 2"/></svg><span id="modified-time" title="Last modified"></span><span id="expires" hidden><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg><span id="expires-bar"><span id="expires-fill"></span></span></span><span id="status"></span></div>
 <pre id="printable"></pre>
 <script>
 function updateStatus() {
-    var state = conflict ? 'conflict' : (content !== textarea.value ? 'saving' : 'saved');
+    var state = conflict ? 'conflict' : (saveError ? 'error' : (content !== textarea.value ? 'saving' : 'saved'));
     statusDot.className = state;
-    statusDot.title = {saved: 'Saved', saving: 'Saving…', conflict: 'Not saved: changed on another device'}[state];
+    statusDot.title = {
+        saved: 'Saved',
+        saving: 'Saving…',
+        conflict: 'Not saved: changed on another device',
+        error: 'Not saved: ' + saveError
+    }[state];
+}
+
+// Reason the server refused the last save (size or note count limit), or empty.
+function setSaveError(message) {
+    saveError = message;
+    updateStatus();
 }
 
 function setConflict(value) {
@@ -986,6 +1132,12 @@ function uploadContent() {
     if (saving || conflict || content === textarea.value) {
         return;
     }
+
+    // Over the size limit the server would answer 413: don't send it, flag it until the text shrinks.
+    if (new Blob([textarea.value]).size > MAX_NOTE_SIZE) {
+        setSaveError('Note too large (max ' + (MAX_NOTE_SIZE >> 20) + ' MB)');
+        return;
+    }
     saving = true;
     var temp = textarea.value;
     var request = new XMLHttpRequest();
@@ -997,11 +1149,15 @@ function uploadContent() {
             content = temp;
             version = request.responseText;
             setMtime(request.getResponseHeader('X-Note-Mtime'));
-            updateStatus();
+            setSaveError('');
         } else if (request.status === 409) {
 
             // The note changed on another device since it was loaded here.
             setConflict(true);
+        } else if (request.status === 413 || request.status === 507) {
+
+            // Size or note count limit: keep trying (cheap below the size limit) and show the reason.
+            setSaveError(request.responseText);
         }
     };
     request.onerror = function() {
@@ -1153,6 +1309,23 @@ function showModified() {
     modifiedLabel.textContent = latest
         ? new Date(latest * 1000).toLocaleTimeString('en-GB', {hour: '2-digit', minute: '2-digit'})
         : 'Unsaved note';
+    showExpiry(Math.max(latest, filesChanged));
+}
+
+// Time left until the server deletes the note for not being changed (same rule as delete_expired_notes()).
+// Uses the server clock: serverOffset corrects the difference with this device's clock.
+function showExpiry(changed) {
+    expires.hidden = !NOTE_TTL || !changed;
+    if (expires.hidden) {
+        return;
+    }
+    var deadline = changed + NOTE_TTL;
+    var seconds = Math.min(NOTE_TTL, Math.max(0, deadline - (Date.now() / 1000 + serverOffset)));
+    var left = Math.ceil(seconds / 60);
+    expiresFill.style.width = (seconds / NOTE_TTL * 100) + '%';
+    expires.classList.toggle('soon', left <= 10);
+    expires.title = 'Auto-delete in ' + (seconds < 60 ? 'less than a minute' : left + (left === 1 ? ' minute' : ' minutes'))
+        + '. Edit the note to cancel it.';
 }
 
 function setMtime(header) {
@@ -1267,6 +1440,7 @@ function applyFiles(request) {
     var data = JSON.parse(request.responseText);
     files = data.files;
     filesVersion = data.version;
+    filesChanged = data.changed || 0;
     renderFiles();
 }
 
@@ -1423,9 +1597,15 @@ var conflict = false;
 var saving = false;
 var checking = false;
 var MAX_FILE_SIZE = <?php print $max_file_size; ?>;
+var MAX_NOTE_SIZE = <?php print $max_note_size; ?>;
+var saveError = '';
 var files = <?php print json_encode($initial_files, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
 var filesVersion = '<?php print files_version($initial_files); ?>';
-var filesList = document.getElementById('files-list');
+var filesChanged = <?php print files_changed($files_dir); ?>;
+var NOTE_TTL = <?php print $note_ttl; ?>;
+var serverOffset = <?php print time(); ?> - Date.now() / 1000;
+var expires = document.getElementById('expires');
+var expiresFill = document.getElementById('expires-fill');var filesList = document.getElementById('files-list');
 var filesCount = document.getElementById('files-count');
 var emptyButton = document.getElementById('empty');
 var fileInput = document.getElementById('file-input');
@@ -1436,6 +1616,7 @@ textarea.focus();
 setInterval(uploadContent, 1000);
 setInterval(checkRemote, 2000);
 setInterval(checkFiles, 2000);
+setInterval(showModified, 15000);
 document.addEventListener('visibilitychange', checkRemote);
 document.addEventListener('visibilitychange', checkFiles);
 renderFiles();

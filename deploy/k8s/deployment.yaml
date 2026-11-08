@@ -37,6 +37,12 @@ spec:
               value: "5"
             - name: MAX_TOTAL_SIZE_MB
               value: "100"
+            - name: MAX_NOTE_SIZE_MB
+              value: "2"
+            - name: MAX_NOTES
+              value: "25"
+            - name: NOTE_TTL_MINUTES
+              value: "45"
             - name: PHP_POST_MAX_SIZE
               value: "8M"
           # "/" answers 302 (redirect to a random note), which probes count as success
