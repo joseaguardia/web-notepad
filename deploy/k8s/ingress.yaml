@@ -1,0 +1,24 @@
+# ingress-nginx limits request bodies to 1 MB by default: raise it above MAX_FILE_SIZE_MB for uploads.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: web-notepad
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "8m"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: notes.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: web-notepad
+                port:
+                  name: http
+  # tls:
+  #   - hosts:
+  #       - notes.example.com
+  #     secretName: web-notepad-tls

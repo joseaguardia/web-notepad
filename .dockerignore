@@ -1,0 +1,5 @@
+# Only index.php, favicon.ico and docker/ are needed to build the image
+*
+!index.php
+!favicon.ico
+!docker/

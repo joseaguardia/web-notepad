@@ -19,10 +19,82 @@ Fork of [pereorga/minimalist-web-notepad](https://github.com/pereorga/minimalist
   - **copy all**: copies the whole note to the clipboard.
   - **clear**: empties the note (and deletes it on the server) without asking.
 - **Copy by block**: every block of text separated by a blank line gets an icon on the left that copies it to the clipboard; hovering it highlights the block.
-- **Footer** with ready-to-copy `curl` commands to upload text or a file to the current note, a link to this repository with the app version, and the last saved time.
+- **Footer** with ready-to-copy `curl` commands to upload text, upload a file and download a file for the current note, a link to this repository with the app version, and the last saved time.
+- **Per-file buttons** in the Files panel: download the file, or copy its `curl` download command.
 - **Light and dark themes** based on the brand palette: follows the browser preference, with a sun/moon button in the footer to switch it (remembered per browser). Also a larger font.
+- **Docker image and Kubernetes manifests**: non-root, read-only container, configured with environment variables.
 
 ## Installation
+
+### Docker
+
+The image (`Dockerfile`) is based on the official `php:8.5.12-apache` image, pinned to a release that fixes the php2shell vulnerabilities (CVE-2026-109618, CVE-2026-109619). Apache runs as `www-data` on port 8080 and the container works with a read-only root filesystem. Notes and attachments are stored in the `/var/lib/notas` volume.
+
+1. Clone the repository and enter it: `git clone https://github.com/joseaguardia/web-notepad.git && cd web-notepad`.
+2. Build and start it with Compose (read-only container, `notes` volume, port 8080; set `PORT` to change it):
+
+   ```
+   docker compose up --detach --build
+   ```
+
+   Or without Compose:
+
+   ```
+   docker build --pull --tag web-notepad . && docker run --detach --name web-notepad --publish 8080:8080 --volume notes:/var/lib/notas --restart unless-stopped web-notepad
+   ```
+
+3. Open `http://localhost:8080/`, which redirects to a new note with a random name.
+
+With Podman, replace `docker` with `podman` in the commands above.
+
+Settings are environment variables (in `docker-compose.yml`, or `--env` with `docker run`):
+
+| Variable | Default | Description |
+|---|---|---|
+| `MAX_FILE_SIZE_MB` | `5` | Maximum size of each attachment |
+| `MAX_TOTAL_SIZE_MB` | `100` | Maximum size of all attachments of all notes together |
+| `PHP_POST_MAX_SIZE` | `8M` | PHP request body limit: keep it a bit larger than `MAX_FILE_SIZE_MB` |
+| `NOTES_PATH` | `/var/lib/notas` | Directory for notes and attachments |
+
+Useful commands:
+
+- Logs: `docker logs --follow web-notepad`
+- Update after pulling changes: `docker compose up --detach --build`
+- Stop (notes are kept in the volume): `docker compose down`; add `--volumes` to delete the notes too.
+
+Nothing is deleted automatically. For temporary notes, add a cron job on the host, e.g. `0 19 * * * docker exec web-notepad find /var/lib/notas -mindepth 1 -delete`.
+
+Behind a reverse proxy, allow request bodies a bit larger than `MAX_FILE_SIZE_MB` (e.g. `client_max_body_size 8m;` in Nginx).
+
+### Kubernetes
+
+The manifests in `deploy/k8s/` use kustomize (built into `kubectl`) and target ingress-nginx:
+
+| File | Resource |
+|---|---|
+| `namespace.yaml` | `web-notepad` namespace |
+| `pvc.yaml` | 1 GiB `ReadWriteOnce` volume for notes and attachments |
+| `deployment.yaml` | Single replica, non-root, read-only root filesystem, probes and resource limits |
+| `service.yaml` | ClusterIP service on port 80 |
+| `ingress.yaml` | Ingress with `proxy-body-size: 8m` (ingress-nginx allows only 1 MB by default) |
+| `cronjob.yaml` | Empties the volume every day at 19:00 Europe/Madrid (remove it from `kustomization.yaml` to keep notes) |
+
+1. Build the image and push it to your registry:
+
+   ```
+   docker build --pull --tag registry.example.com/web-notepad:1.4 . && docker push registry.example.com/web-notepad:1.4
+   ```
+
+2. Set the image in `kustomization.yaml` (`images`), the host in `ingress.yaml` (plus TLS if needed) and, optionally, the storage size in `pvc.yaml` and the limits in the `env` of `deployment.yaml`.
+3. Apply and check:
+
+   ```
+   kubectl apply --kustomize deploy/k8s && kubectl --namespace web-notepad rollout status deployment/web-notepad
+   ```
+
+Keep a single replica: saves are serialized with a file lock in the volume, which is `ReadWriteOnce`. The cleanup CronJob runs on the same node as the app pod for the same reason.
+
+### Manual
 
 1. Copy `index.php`, `.htaccess` and `favicon.ico` to your server (PHP 7+).
 2. Make the notes directory writable by the web server. It is `/var/lib/notas` by default; change it with `$save_path` at the top of `index.php` (preferably outside the document root). Attachments are stored there too, in a `<note>.files/` directory per note.

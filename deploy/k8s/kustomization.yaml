@@ -1,0 +1,25 @@
+# Web notepad on Kubernetes (ingress-nginx). Apply with: kubectl apply --kustomize deploy/k8s
+# Adjust the image (built from the Dockerfile and pushed to your registry), the host in ingress.yaml,
+# the storage size in pvc.yaml and the cleanup schedule in cronjob.yaml.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: web-notepad
+
+labels:
+  - pairs:
+      app.kubernetes.io/name: web-notepad
+    includeSelectors: true
+
+resources:
+  - namespace.yaml
+  - pvc.yaml
+  - deployment.yaml
+  - service.yaml
+  - ingress.yaml
+  - cronjob.yaml
+
+images:
+  - name: web-notepad
+    newName: registry.example.com/web-notepad
+    newTag: "1.4"

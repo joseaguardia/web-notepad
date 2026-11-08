@@ -1,0 +1,34 @@
+# Web notepad with Docker Compose: http://localhost:8080/<note>
+# Notes live in the "notes" volume. There is no automatic cleanup: if notes should be temporary,
+# add a cron job on the host, e.g. every day at 19:00:
+#   0 19 * * * docker exec web-notepad find /var/lib/notas -mindepth 1 -delete
+# Behind a reverse proxy, allow request bodies a bit larger than MAX_FILE_SIZE_MB.
+
+services:
+  notepad:
+    build: .
+    image: web-notepad:latest
+    container_name: web-notepad
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8080}:8080"
+    environment:
+      MAX_FILE_SIZE_MB: 5
+      MAX_TOTAL_SIZE_MB: 100
+      PHP_POST_MAX_SIZE: 8M
+    volumes:
+      - notes:/var/lib/notas
+    # Read-only container: Apache only needs to write its pid/lock files and PHP its temp files
+    read_only: true
+    tmpfs:
+      - /var/run/apache2
+      - /var/lock/apache2
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 192m
+
+volumes:
+  notes:

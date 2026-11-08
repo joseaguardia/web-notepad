@@ -1,0 +1,85 @@
+# One replica only: saves are serialized with flock on a file in the volume and the volume is
+# ReadWriteOnce, so several replicas would need shared storage with reliable locking.
+# Recreate (not RollingUpdate) so the old pod releases the volume before the new one starts.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-notepad
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: app
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: app
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 33
+        runAsGroup: 33
+        fsGroup: 33
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: web-notepad
+          image: web-notepad
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            # Keep PHP_POST_MAX_SIZE a bit larger than MAX_FILE_SIZE_MB, and the ingress body size above both
+            - name: MAX_FILE_SIZE_MB
+              value: "5"
+            - name: MAX_TOTAL_SIZE_MB
+              value: "100"
+            - name: PHP_POST_MAX_SIZE
+              value: "8M"
+          # "/" answers 302 (redirect to a random note), which probes count as success
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              memory: 192Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/notas
+            # Writable paths needed with a read-only root filesystem
+            - name: apache-run
+              mountPath: /var/run/apache2
+            - name: apache-lock
+              mountPath: /var/lock/apache2
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: web-notepad-data
+        - name: apache-run
+          emptyDir: {}
+        - name: apache-lock
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}

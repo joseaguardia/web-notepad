@@ -1,0 +1,11 @@
+# Notes and attachments. ReadWriteOnce: a single pod writes (see the replicas note in deployment.yaml).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: web-notepad-data
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi

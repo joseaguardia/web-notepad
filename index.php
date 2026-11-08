@@ -1,16 +1,18 @@
 <?php
 
+// Settings can be overridden with environment variables (Docker/Kubernetes); the values here are the defaults.
+
 // Path to the directory to save the notes in, without trailing slash.
 // Should be outside the document root, if possible.
-$save_path = '/var/lib/notas';
+$save_path = rtrim(getenv('NOTES_PATH') ?: '/var/lib/notas', '/');
 
 // Shown in the footer next to the GitHub link. Bump it on each release.
-$app_version = '1.3';
+$app_version = '1.4';
 $repo_url = 'https://github.com/joseaguardia/web-notepad';
 
 // Attachment limits: size of each file, and total size of all attachments of all notes.
-$max_file_size = 5 * 1024 * 1024;
-$max_total_size = 100 * 1024 * 1024;
+$max_file_size = (int) (getenv('MAX_FILE_SIZE_MB') ?: 5) * 1024 * 1024;
+$max_total_size = (int) (getenv('MAX_TOTAL_SIZE_MB') ?: 100) * 1024 * 1024;
 
 // Disable caching.
 header('Cache-Control: no-store');

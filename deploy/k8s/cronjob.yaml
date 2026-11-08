@@ -1,0 +1,56 @@
+# Deletes every note and attachment once a day (the app keeps no history; remove this file to keep notes).
+# The volume is ReadWriteOnce, so the job must run on the same node as the app pod (podAffinity).
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: web-notepad-cleanup
+spec:
+  schedule: "0 19 * * *"
+  timeZone: Europe/Madrid
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 33
+            runAsGroup: 33
+            fsGroup: 33
+            seccompProfile:
+              type: RuntimeDefault
+          affinity:
+            podAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                - labelSelector:
+                    matchLabels:
+                      app.kubernetes.io/name: web-notepad
+                      app.kubernetes.io/component: app
+                  topologyKey: kubernetes.io/hostname
+          containers:
+            - name: cleanup
+              image: busybox:1.37
+              command: ["find", "/var/lib/notas", "-mindepth", "1", "-delete"]
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 16Mi
+                limits:
+                  memory: 32Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop:
+                    - ALL
+              volumeMounts:
+                - name: data
+                  mountPath: /var/lib/notas
+          volumes:
+            - name: data
+              persistentVolumeClaim:
+                claimName: web-notepad-data
