@@ -5,7 +5,7 @@
 $save_path = '/var/lib/notas';
 
 // Shown in the footer next to the GitHub link. Bump it on each release.
-$app_version = '1.1';
+$app_version = '1.2';
 $repo_url = 'https://github.com/joseaguardia/web-notepad';
 
 // Attachment limits: size of each file, and total size of all attachments of all notes.
@@ -232,6 +232,14 @@ $initial_files = list_files($files_dir);
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap">
+<script>
+// Set the theme before the first paint: saved choice, otherwise the system preference
+(function() {
+    var saved = null;
+    try { saved = localStorage.getItem('theme'); } catch (e) {}
+    document.documentElement.dataset.theme = saved || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+})();
+</script>
 <style>
 html,
 body {
@@ -252,13 +260,54 @@ body {
         --editor-padding: 16px 104px 16px 56px;
     }
 }
+/* Color tokens. Triplets ("r, g, b") are used as rgb(var(--x)) or rgba(var(--x), alpha). */
+:root {
+    color-scheme: dark;
+    --bg: #004254;
+    --bg-from: #004d61;
+    --bg-to: #002f3d;
+    --surface: 0, 25, 35;
+    --text: 227, 226, 218;
+    --primary: 79, 209, 232;
+    --neutral: 229, 231, 235;
+    --teal: 45, 212, 191;
+    --ok: 110, 231, 183;
+    --warn: 245, 165, 36;
+    --danger: 242, 139, 150;
+    --selection: #0a6f88;
+    --selection-text: #fff;
+    --code-bg: rgba(0, 0, 0, 0.25);
+    --shadow: rgba(0, 0, 0, 0.35);
+    --shadow-soft: rgba(0, 0, 0, 0.25);
+}
+:root[data-theme="light"] {
+    color-scheme: light;
+    /* Brand palette: Gris Cerámica background, white surfaces, Azul Oscuro text,
+       Azul Claro highlights and Azul Amazónico for the attachments accent */
+    --bg: #e3e2da;
+    --bg-from: #e9e8e1;
+    --bg-to: #d9d8cf;
+    --surface: 255, 255, 255;
+    --text: 0, 25, 35;
+    --primary: 0, 176, 189;
+    --neutral: 0, 25, 35;
+    --teal: 0, 66, 84;
+    --ok: 5, 150, 105;
+    --warn: 217, 119, 6;
+    --danger: 220, 38, 38;
+    --selection: #b3e7eb;
+    --selection-text: rgb(0, 25, 35);
+    --code-bg: rgba(0, 66, 84, 0.08);
+    --shadow: rgba(0, 25, 35, 0.12);
+    --shadow-soft: rgba(0, 25, 35, 0.10);
+}
 button {
     font-family: inherit;
 }
 body {
     margin: 0;
     font-family: var(--mono);
-    background: #004254 linear-gradient(160deg, #004d61 0%, #002f3d 100%) fixed;
+    background: var(--bg) linear-gradient(160deg, var(--bg-from) 0%, var(--bg-to) 100%) fixed;
 }
 .container {
     position: absolute;
@@ -277,7 +326,7 @@ body {
     justify-content: flex-end;
     gap: 8px;
     font: 16px/24px var(--mono);
-    color: #E3E2DA;
+    color: rgb(var(--text));
     opacity: 0.6;
 }
 #modified svg {
@@ -293,8 +342,25 @@ body {
     text-decoration: none;
     transition: color 0.15s;
 }
+/* Shows the icon of the theme it switches to */
+#theme {
+    display: flex;
+    flex-shrink: 0;
+    padding: 0;
+    margin-right: 8px;
+    color: inherit;
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+    transition: color 0.15s;
+}
+[data-theme="dark"] #theme .icon-moon,
+[data-theme="light"] #theme .icon-sun {
+    display: none;
+}
+#theme:hover,
 #repo:hover {
-    color: #4fd1e8;
+    color: rgb(var(--primary));
 }
 #status {
     flex-shrink: 0;
@@ -307,14 +373,14 @@ body {
     transition: color 0.3s;
 }
 #status.saved {
-    color: #6ee7b7;
+    color: rgb(var(--ok));
 }
 #status.saving {
-    color: #f5a524;
+    color: rgb(var(--warn));
     animation: pulse 1s ease-in-out infinite alternate;
 }
 #status.conflict {
-    color: #f28b96;
+    color: rgb(var(--danger));
 }
 @keyframes pulse {
     to {
@@ -337,7 +403,7 @@ body {
 #tip code {
     padding: 1px 6px;
     font: inherit;
-    background: rgba(0, 0, 0, 0.25);
+    background: var(--code-bg);
     border-radius: 4px;
 }
 @media (max-width: 800px) {
@@ -353,22 +419,22 @@ body {
     width: 100%;
     height: 100%;
     box-sizing: border-box;
-    background: #001923;
-    color: #E3E2DA;
-    caret-color: #4fd1e8;
-    border: 1px solid rgba(79, 209, 232, 0.15);
+    background: rgb(var(--surface));
+    color: rgb(var(--text));
+    caret-color: rgb(var(--primary));
+    border: 1px solid rgba(var(--primary), 0.15);
     border-radius: 12px;
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+    box-shadow: 0 12px 32px var(--shadow);
     outline: none;
     font: var(--editor-font);
     transition: border-color 0.2s, box-shadow 0.2s;
 }
 #content:focus {
-    border-color: rgba(79, 209, 232, 0.3);
+    border-color: rgba(var(--primary), 0.3);
 }
 #content::selection {
-    background: #0a6f88;
-    color: #fff;
+    background: var(--selection);
+    color: var(--selection-text);
 }
 #printable {
     display: none;
@@ -408,7 +474,7 @@ body {
     right: 0;
     bottom: 12px;
     width: 1px;
-    background: rgba(227, 226, 218, 0.08);
+    background: rgba(var(--text), 0.08);
 }
 #gutter-inner {
     position: relative;
@@ -418,7 +484,7 @@ body {
     left: 4px;
     width: 3px;
     border-radius: 2px;
-    background: #4fd1e8;
+    background: rgb(var(--primary));
     opacity: 0;
     transition: opacity 0.15s;
 }
@@ -426,7 +492,7 @@ body {
     opacity: 0.8;
 }
 .copy-btn.copied + .block-bar {
-    background: #6ee7b7;
+    background: rgb(var(--ok));
     opacity: 0.8;
 }
 .copy-btn {
@@ -438,7 +504,7 @@ body {
     width: 30px;
     height: 30px;
     padding: 0;
-    color: #E3E2DA;
+    color: rgb(var(--text));
     background: transparent;
     border: 0;
     border-radius: 6px;
@@ -449,7 +515,7 @@ body {
 }
 .copy-btn:hover {
     opacity: 1;
-    background: #003040;
+    background: rgba(var(--primary), 0.12);
 }
 .icon-check,
 .copied .icon-copy {
@@ -459,7 +525,7 @@ body {
     display: block;
 }
 .copy-btn.copied {
-    color: #6ee7b7;
+    color: rgb(var(--ok));
     opacity: 1;
 }
 .action {
@@ -475,12 +541,12 @@ body {
     height: 64px;
     padding: 0;
     cursor: pointer;
-    --accent: 79, 209, 232;
+    --accent: var(--primary);
     color: rgb(var(--accent));
     background: rgba(var(--accent), 0.08);
     border: 1px solid rgba(var(--accent), 0.35);
     border-radius: 12px;
-    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+    box-shadow: 0 6px 18px var(--shadow-soft);
     backdrop-filter: blur(4px);
     transition: background 0.15s, border-color 0.15s, transform 0.15s;
 }
@@ -502,7 +568,7 @@ body {
     line-height: 20px;
     white-space: nowrap;
     color: rgb(var(--accent));
-    background: #001923;
+    background: rgb(var(--surface));
     border: 1px solid rgba(var(--accent), 0.35);
     border-radius: 6px;
     opacity: 0;
@@ -516,7 +582,7 @@ body {
 }
 #copy-all {
     bottom: 128px;
-    --accent: 229, 231, 235;
+    --accent: var(--neutral);
 }
 #refresh {
     top: 40px;
@@ -524,17 +590,17 @@ body {
 }
 #clear {
     bottom: 40px;
-    --accent: 242, 139, 150;
+    --accent: var(--danger);
 }
 #refresh.conflict {
     display: flex;
-    --accent: 245, 165, 36;
+    --accent: var(--warn);
     background: rgba(var(--accent), 0.25);
     border-color: rgb(var(--accent));
 }
 #attach {
     bottom: 216px;
-    --accent: 45, 212, 191;
+    --accent: var(--teal);
 }
 /* Attachments panel: hidden until the first file, then splits the page about 80/20
    (side by side, or stacked on narrow screens) */
@@ -554,11 +620,11 @@ body {
     box-sizing: border-box;
     padding: 14px;
     font: 15px/21px var(--mono);
-    color: #E3E2DA;
-    background: #001923;
-    border: 1px solid rgba(79, 209, 232, 0.15);
+    color: rgb(var(--text));
+    background: rgb(var(--surface));
+    border: 1px solid rgba(var(--primary), 0.15);
     border-radius: 12px;
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+    box-shadow: 0 12px 32px var(--shadow);
 }
 body.has-files .container {
     right: calc(var(--files-width) + 16px);
@@ -586,15 +652,15 @@ body.has-files #files {
     font-weight: 500;
     letter-spacing: 0.1em;
     text-transform: uppercase;
-    color: rgba(227, 226, 218, 0.6);
+    color: rgba(var(--text), 0.6);
 }
 #files-count {
     padding: 0 8px;
     font-size: 12px;
     line-height: 18px;
     letter-spacing: 0;
-    color: rgb(45, 212, 191);
-    background: rgba(45, 212, 191, 0.12);
+    color: rgb(var(--teal));
+    background: rgba(var(--teal), 0.12);
     border-radius: 999px;
 }
 #files-list {
@@ -608,11 +674,11 @@ body.has-files #files {
     gap: 10px;
     margin-bottom: 6px;
     padding: 8px 4px 8px 10px;
-    background: rgba(79, 209, 232, 0.08);
+    background: rgba(var(--primary), 0.08);
     border-radius: 8px;
 }
 .file:hover {
-    background: rgba(79, 209, 232, 0.15);
+    background: rgba(var(--primary), 0.15);
 }
 .file-icon {
     flex-shrink: 0;
@@ -630,12 +696,12 @@ body.has-files #files {
     text-overflow: ellipsis;
 }
 .file a {
-    color: #E3E2DA;
+    color: rgb(var(--text));
     text-decoration: none;
     transition: color 0.15s;
 }
 .file a:hover {
-    color: rgb(45, 212, 191);
+    color: rgb(var(--teal));
     text-decoration: underline;
 }
 .file .size {
@@ -650,7 +716,7 @@ body.has-files #files {
     padding: 0;
     font-size: 26px;
     line-height: 1;
-    color: #E3E2DA;
+    color: rgb(var(--text));
     background: transparent;
     border: 0;
     border-radius: 6px;
@@ -659,9 +725,9 @@ body.has-files #files {
     transition: opacity 0.15s, color 0.15s, background 0.15s;
 }
 .file button:hover {
-    color: #f28b96;
+    color: rgb(var(--danger));
     opacity: 1;
-    background: rgba(242, 139, 150, 0.15);
+    background: rgba(var(--danger), 0.15);
 }
 .file.uploading {
     opacity: 0.6;
@@ -676,7 +742,7 @@ body.has-files #files {
     height: 38px;
     font-size: 14px;
     cursor: pointer;
-    --accent: 242, 139, 150;
+    --accent: var(--danger);
     color: rgb(var(--accent));
     background: transparent;
     border: 1px solid rgba(var(--accent), 0.3);
@@ -699,9 +765,9 @@ body.has-files #files {
     align-items: center;
     justify-content: center;
     font: 26px var(--mono);
-    color: #4fd1e8;
-    background: rgba(0, 25, 35, 0.85);
-    border: 3px dashed #4fd1e8;
+    color: rgb(var(--primary));
+    background: rgba(var(--surface), 0.85);
+    border: 3px dashed rgb(var(--primary));
     border-radius: 12px;
 }
 body.dragging #drop {
@@ -742,7 +808,7 @@ if ($initial_text !== false) {
 <button id="empty" type="button" title="Delete all files (the note text is kept)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>empty</button>
 </div>
 <div id="drop">Drop files to attach them (max <?php print $max_file_size >> 20; ?> MB each)</div>
-<div id="modified"><span id="tip"><div>Upload text: <code id="tip-text"></code></div><div>Upload file: <code id="tip-upload"></code></div></span><a id="repo" href="<?php print $repo_url; ?>" target="_blank" rel="noopener noreferrer" title="Source code on GitHub"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.93.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.22.165.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>v<?php print $app_version; ?></a><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M12 7v5l3 2"/></svg><span id="modified-time" title="Last modified"></span><span id="status"></span></div>
+<div id="modified"><span id="tip"><div>Upload text: <code id="tip-text"></code></div><div>Upload file: <code id="tip-upload"></code></div></span><button id="theme" type="button" title="Switch light/dark theme"><svg class="icon-sun" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg><svg class="icon-moon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg></button><a id="repo" href="<?php print $repo_url; ?>" target="_blank" rel="noopener noreferrer" title="Source code on GitHub"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.93.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.22.165.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>v<?php print $app_version; ?></a><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M12 7v5l3 2"/></svg><span id="modified-time" title="Last modified"></span><span id="status"></span></div>
 <pre id="printable"></pre>
 <script>
 function updateStatus() {
@@ -1152,6 +1218,31 @@ var noteUrl = window.location.origin + window.location.pathname;
 document.getElementById('tip-text').textContent = '<command> | curl --data-binary @- ' + noteUrl;
 document.getElementById('tip-upload').textContent = "curl -T <file> '" + noteUrl + "?upload=<name>'";
 var mtime = <?php print $initial_mtime; ?>;
+
+// Theme toggle: a choice equal to the system preference is forgotten, so the page follows the system again
+var systemLight = matchMedia('(prefers-color-scheme: light)');
+function systemTheme() {
+    return systemLight.matches ? 'light' : 'dark';
+}
+document.getElementById('theme').addEventListener('click', function() {
+    var theme = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
+    document.documentElement.dataset.theme = theme;
+    try {
+        if (theme === systemTheme()) {
+            localStorage.removeItem('theme');
+        } else {
+            localStorage.setItem('theme', theme);
+        }
+    } catch (e) {}
+});
+systemLight.addEventListener('change', function() {
+    var saved = null;
+    try { saved = localStorage.getItem('theme'); } catch (e) {}
+    if (!saved) {
+        document.documentElement.dataset.theme = systemTheme();
+    }
+});
+
 var gutterInner = document.getElementById('gutter-inner');
 var mirror = document.getElementById('mirror');
 var printable = document.getElementById('printable');

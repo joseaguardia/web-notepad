@@ -3,7 +3,10 @@
 A web notepad in a single PHP file: open a URL, type, and it saves itself. Drop files on it to share them between devices.
 Fork of [pereorga/minimalist-web-notepad](https://github.com/pereorga/minimalist-web-notepad).
 
-![Screenshot](screenshot.png)
+<picture>
+  <source media="(prefers-color-scheme: light)" srcset="screenshot-light.png">
+  <img alt="Screenshot" src="screenshot.png">
+</picture>
 
 ## What this fork adds
 
@@ -17,7 +20,7 @@ Fork of [pereorga/minimalist-web-notepad](https://github.com/pereorga/minimalist
   - **clear**: empties the note (and deletes it on the server) without asking.
 - **Copy by block**: every block of text separated by a blank line gets an icon on the left that copies it to the clipboard; hovering it highlights the block.
 - **Footer** with ready-to-copy `curl` commands to upload text or a file to the current note, a link to this repository with the app version, and the last saved time.
-- **Dark theme** and a larger font.
+- **Light and dark themes** based on the brand palette: follows the browser preference, with a sun/moon button in the footer to switch it (remembered per browser). Also a larger font.
 
 ## Installation
 
