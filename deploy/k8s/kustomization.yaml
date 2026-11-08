@@ -22,4 +22,4 @@ resources:
 images:
   - name: web-notepad
     newName: registry.example.com/web-notepad
-    newTag: "1.4"
+    newTag: "1.5"

@@ -7,7 +7,7 @@
 $save_path = rtrim(getenv('NOTES_PATH') ?: '/var/lib/notas', '/');
 
 // Shown in the footer next to the GitHub link. Bump it on each release.
-$app_version = '1.4';
+$app_version = '1.5';
 $repo_url = 'https://github.com/joseaguardia/web-notepad';
 
 // Attachment limits: size of each file, and total size of all attachments of all notes.
@@ -258,13 +258,12 @@ body {
     --editor-font: 17px/1.6 var(--mono);
     --editor-padding: 20px 120px 20px 56px;
     /* Space below the editor and the files panel, room for the footer */
-    --footer-height: 80px;
+    --footer-height: 56px;
 }
 @media (max-width: 800px) {
     :root {
         --editor-font: 15px/1.6 var(--mono);
         --editor-padding: 16px 104px 16px 56px;
-        --footer-height: 68px;
     }
 }
 /* Color tokens. Triplets ("r, g, b") are used as rgb(var(--x)) or rgba(var(--x), alpha). */
@@ -334,6 +333,10 @@ body {
     gap: 8px;
     font: 16px/24px var(--mono);
     color: rgb(var(--text));
+}
+/* Dimmed per child rather than on #modified, so the commands popover stays opaque */
+#modified > :not(#cli),
+#cli-toggle {
     opacity: 0.6;
 }
 #modified svg {
@@ -366,7 +369,9 @@ body {
     display: none;
 }
 #theme:hover,
-#repo:hover {
+#repo:hover,
+#cli-toggle:hover,
+#cli.open #cli-toggle {
     color: rgb(var(--primary));
 }
 #status {
@@ -394,32 +399,85 @@ body {
         opacity: 0.3;
     }
 }
-/* Label and command columns, so the commands line up */
-#tip {
-    display: grid;
-    grid-template-columns: max-content minmax(0, 1fr);
-    column-gap: 8px;
+/* curl commands: a footer button that shows them in a popover on hover (or click, pinned) */
+#cli {
+    position: relative;
     margin-right: auto;
-    min-width: 0;
+}
+#cli-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0;
+    font: inherit;
+    color: inherit;
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+    transition: color 0.15s;
+}
+#cli.open #cli-toggle {
+    opacity: 1;
+}
+/* The bottom padding bridges the gap to the button, so hover is not lost on the way up */
+#cli-panel {
+    position: absolute;
+    bottom: 100%;
+    left: 0;
+    z-index: 5;
+    display: none;
+    padding-bottom: 10px;
+}
+@media (hover: hover) {
+    #cli:hover #cli-panel {
+        display: block;
+    }
+}
+#cli.open #cli-panel {
+    display: block;
+}
+/* Label, command and copy button columns */
+#cli-list {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 6px 10px;
+    width: max-content;
+    max-width: calc(100vw - 40px);
+    box-sizing: border-box;
+    padding: 12px 10px 12px 14px;
     font-size: 14px;
     line-height: 20px;
+    background: rgb(var(--surface));
+    border: 1px solid rgba(var(--text), 0.12);
+    border-radius: 10px;
+    box-shadow: 0 8px 24px var(--shadow);
 }
-#tip code {
+#cli-list span {
+    opacity: 0.6;
+    cursor: pointer;
+}
+#cli-list code {
     justify-self: start;
     max-width: 100%;
     box-sizing: border-box;
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
-    padding: 0 6px;
+    padding: 2px 8px;
     font: inherit;
     background: var(--code-bg);
     border-radius: 4px;
+    cursor: pointer;
+    transition: color 0.15s, background 0.15s;
 }
-@media (max-width: 800px) {
-    #tip {
-        display: none;
-    }
+#cli-list code:hover {
+    color: rgb(var(--teal));
+    background: rgba(var(--teal), 0.15);
+}
+#cli-list .file-action {
+    width: 28px;
+    height: 28px;
 }
 #content {
     margin: 0;
@@ -851,7 +909,7 @@ if ($initial_text !== false) {
 <button id="empty" type="button" title="Delete all files (the note text is kept)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>empty</button>
 </div>
 <div id="drop">Drop files to attach them (max <?php print $max_file_size >> 20; ?> MB each)</div>
-<div id="modified"><span id="tip"><span>Upload text:</span><code id="tip-text"></code><span>Upload file:</span><code id="tip-upload"></code><span>Download file:</span><code id="tip-download"></code></span><button id="theme" type="button" title="Switch light/dark theme"><svg class="icon-sun" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg><svg class="icon-moon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg></button><a id="repo" href="<?php print $repo_url; ?>" target="_blank" rel="noopener noreferrer" title="Source code on GitHub"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.93.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.22.165.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>v<?php print $app_version; ?></a><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M12 7v5l3 2"/></svg><span id="modified-time" title="Last modified"></span><span id="status"></span></div>
+<div id="modified"><div id="cli"><div id="cli-panel"><div id="cli-list"></div></div><button id="cli-toggle" type="button" aria-expanded="false" title="Command-line usage"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></svg>commands help</button></div><button id="theme" type="button" title="Switch light/dark theme"><svg class="icon-sun" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg><svg class="icon-moon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg></button><a id="repo" href="<?php print $repo_url; ?>" target="_blank" rel="noopener noreferrer" title="Source code on GitHub"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.93.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.22.165.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>v<?php print $app_version; ?></a><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M12 7v5l3 2"/></svg><span id="modified-time" title="Last modified"></span><span id="status"></span></div>
 <pre id="printable"></pre>
 <script>
 function updateStatus() {
@@ -1283,9 +1341,52 @@ var textarea = document.getElementById('content');
 var modifiedLabel = document.getElementById('modified-time');
 var statusDot = document.getElementById('status');
 var noteUrl = window.location.origin + window.location.pathname;
-document.getElementById('tip-text').textContent = '<command> | curl --data-binary @- ' + noteUrl;
-document.getElementById('tip-upload').textContent = 'curl -T <file> ' + noteUrl + '/';
-document.getElementById('tip-download').textContent = 'curl -O ' + noteUrl + '/<file>';
+var cli = document.getElementById('cli');
+var cliToggle = document.getElementById('cli-toggle');
+var cliList = document.getElementById('cli-list');
+// [label, shown command, copied text if different: the placeholder is left out so it can follow a command]
+[
+    ['Upload text', '<command> | curl --data-binary @- ' + noteUrl, ' | curl --data-binary @- ' + noteUrl],
+    ['Upload file', 'curl -T <file> ' + noteUrl + '/'],
+    ['Download file', 'curl -O ' + noteUrl + '/<file>']
+].forEach(function(item) {
+    var label = document.createElement('span');
+    label.textContent = item[0];
+    var code = document.createElement('code');
+    code.textContent = item[1];
+    code.title = item[1];
+    var copy = document.createElement('button');
+    copy.type = 'button';
+    copy.className = 'file-action';
+    copy.title = 'Copy command';
+    copy.innerHTML = COPY_ICONS;
+    // The whole row copies; the button shows the feedback
+    label.onclick = code.onclick = copy.onclick = function() {
+        copyBlock(item[2] || item[1], copy);
+    };
+    cliList.appendChild(label);
+    cliList.appendChild(code);
+    cliList.appendChild(copy);
+});
+
+function setCliOpen(open) {
+    cli.classList.toggle('open', open);
+    cliToggle.setAttribute('aria-expanded', open);
+}
+
+cliToggle.addEventListener('click', function() {
+    setCliOpen(!cli.classList.contains('open'));
+});
+document.addEventListener('click', function(event) {
+    if (!cli.contains(event.target)) {
+        setCliOpen(false);
+    }
+});
+document.addEventListener('keydown', function(event) {
+    if (event.key === 'Escape') {
+        setCliOpen(false);
+    }
+});
 var mtime = <?php print $initial_mtime; ?>;
 
 // Theme toggle: a choice equal to the system preference is forgotten, so the page follows the system again

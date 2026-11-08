@@ -3,10 +3,7 @@
 A web notepad in a single PHP file: open a URL, type, and it saves itself. Drop files on it to share them between devices.
 Fork of [pereorga/minimalist-web-notepad](https://github.com/pereorga/minimalist-web-notepad).
 
-<picture>
-  <source media="(prefers-color-scheme: light)" srcset="screenshot-light.png">
-  <img alt="Screenshot" src="screenshot.png">
-</picture>
+![Screenshot showing the light and dark themes](screenshot.png)
 
 ## What this fork adds
 
@@ -19,7 +16,7 @@ Fork of [pereorga/minimalist-web-notepad](https://github.com/pereorga/minimalist
   - **copy all**: copies the whole note to the clipboard.
   - **clear**: empties the note (and deletes it on the server) without asking.
 - **Copy by block**: every block of text separated by a blank line gets an icon on the left that copies it to the clipboard; hovering it highlights the block.
-- **Footer** with ready-to-copy `curl` commands to upload text, upload a file and download a file for the current note, a link to this repository with the app version, and the last saved time.
+- **Footer** with a **commands help** button that shows, on hover or click, the commands to upload text, upload a file and download a file for the current note, each with a copy button; plus a link to this repository with the app version, and the last saved time.
 - **Per-file buttons** in the Files panel: download the file, or copy its `curl` download command.
 - **Light and dark themes** based on the brand palette: follows the browser preference, with a sun/moon button in the footer to switch it (remembered per browser). Also a larger font.
 - **Docker image and Kubernetes manifests**: non-root, read-only container, configured with environment variables.
@@ -82,7 +79,7 @@ The manifests in `deploy/k8s/` use kustomize (built into `kubectl`) and target i
 1. Build the image and push it to your registry:
 
    ```
-   docker build --pull --tag registry.example.com/web-notepad:1.4 . && docker push registry.example.com/web-notepad:1.4
+   docker build --pull --tag registry.example.com/web-notepad:1.5 . && docker push registry.example.com/web-notepad:1.5
    ```
 
 2. Set the image in `kustomization.yaml` (`images`), the host in `ingress.yaml` (plus TLS if needed) and, optionally, the storage size in `pvc.yaml` and the limits in the `env` of `deployment.yaml`.
