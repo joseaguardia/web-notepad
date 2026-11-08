@@ -36,6 +36,15 @@ Fork of [pereorga/minimalist-web-notepad](https://github.com/pereorga/minimalist
 location ~* ^/notes/([a-zA-Z0-9_-]+)$ {
     try_files $uri /notes/index.php?note=$1&$args;
 }
+
+# PUT /notes/<note>/<file> uploads an attachment (curl --upload-file <file> https://example.com/notes/<note>/),
+# GET downloads it (curl --remote-name https://example.com/notes/<note>/<file>)
+location ~* ^/notes/(?<note>[a-zA-Z0-9_-]+)/(?<file>[^/]+)$ {
+    if ($request_method ~ ^(PUT|POST)$) {
+        rewrite ^ /notes/index.php?note=$note&upload=$file last;
+    }
+    try_files $uri /notes/index.php?note=$note&file=$file&$args;
+}
 ```
 
 ### Attachment settings
@@ -65,11 +74,14 @@ ls -la | curl --data-binary @- https://example.com/notes/test
 # Save a file's contents as the note text
 curl --data-binary @/etc/hosts https://example.com/notes/hosts
 
-# Attach a file to a note (the name after ?upload= is the stored name)
-curl --upload-file report.pdf 'https://example.com/notes/test?upload=report.pdf'
+# Attach a file to a note (with a trailing slash curl appends the local file name)
+curl --upload-file report.pdf https://example.com/notes/test/
 
-# Download an attachment with its original name
-curl --remote-name --remote-header-name 'https://example.com/notes/test?file=report.pdf'
+# Attach a file under a different name
+curl --upload-file report.pdf 'https://example.com/notes/test?upload=2026-report.pdf'
+
+# Download an attachment (saved as report.pdf in the current directory)
+curl --remote-name https://example.com/notes/test/report.pdf
 
 # List the attachments of a note (JSON)
 curl 'https://example.com/notes/test?files'

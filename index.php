@@ -5,7 +5,7 @@
 $save_path = '/var/lib/notas';
 
 // Shown in the footer next to the GitHub link. Bump it on each release.
-$app_version = '1.2';
+$app_version = '1.3';
 $repo_url = 'https://github.com/joseaguardia/web-notepad';
 
 // Attachment limits: size of each file, and total size of all attachments of all notes.
@@ -80,6 +80,8 @@ $files_dir = $path . '.files';
 $method = $_SERVER['REQUEST_METHOD'];
 
 // Upload an attachment: the raw request body is the file, e.g. curl --upload-file photo.png '<url>?upload=photo.png'.
+// The rewrite also maps PUT/POST <url>/<file> here, so curl --upload-file photo.png <url>/ names it automatically
+// (and GET <url>/<file> to ?file=<file>, the download below).
 // file_uploads is disabled in PHP on purpose, so no multipart parsing is involved.
 if (isset($_GET['upload']) && ($method === 'POST' || $method === 'PUT')) {
     $length = $_SERVER['CONTENT_LENGTH'] ?? '';
@@ -253,11 +255,14 @@ body {
     --mono: 'JetBrains Mono', monospace;
     --editor-font: 17px/1.6 var(--mono);
     --editor-padding: 20px 120px 20px 56px;
+    /* Space below the editor and the files panel, room for the footer */
+    --footer-height: 80px;
 }
 @media (max-width: 800px) {
     :root {
         --editor-font: 15px/1.6 var(--mono);
         --editor-padding: 16px 104px 16px 56px;
+        --footer-height: 68px;
     }
 }
 /* Color tokens. Triplets ("r, g, b") are used as rgb(var(--x)) or rgba(var(--x), alpha). */
@@ -313,7 +318,7 @@ body {
     position: absolute;
     top: 20px;
     right: 20px;
-    bottom: 68px;
+    bottom: var(--footer-height);
     left: 20px;
 }
 #modified {
@@ -387,21 +392,24 @@ body {
         opacity: 0.3;
     }
 }
+/* Label and command columns, so the commands line up */
 #tip {
-    display: flex;
-    flex-direction: column;
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    column-gap: 8px;
     margin-right: auto;
     min-width: 0;
-    font-size: 15px;
-    line-height: 22px;
+    font-size: 14px;
+    line-height: 20px;
 }
-#tip div {
+#tip code {
+    justify-self: start;
+    max-width: 100%;
+    box-sizing: border-box;
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
-}
-#tip code {
-    padding: 1px 6px;
+    padding: 0 6px;
     font: inherit;
     background: var(--code-bg);
     border-radius: 4px;
@@ -612,7 +620,7 @@ body {
     position: absolute;
     top: 20px;
     right: 20px;
-    bottom: 68px;
+    bottom: var(--footer-height);
     width: calc(var(--files-width) - 20px);
     display: none;
     flex-direction: column;
@@ -641,7 +649,7 @@ body.has-files #files {
     }
     body.has-files .container {
         right: 20px;
-        bottom: calc(var(--files-height) + 84px);
+        bottom: calc(var(--files-height) + var(--footer-height) + 16px);
     }
 }
 #files-title {
@@ -695,21 +703,54 @@ body.has-files #files {
     white-space: nowrap;
     text-overflow: ellipsis;
 }
-.file a {
+.file .name {
     color: rgb(var(--text));
     text-decoration: none;
     transition: color 0.15s;
 }
-.file a:hover {
+a.name:hover {
     color: rgb(var(--teal));
     text-decoration: underline;
 }
+.file .details {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+/* Fixed width (monospace) so the buttons line up across cards */
 .file .size {
+    min-width: 7ch;
+    margin-right: 4px;
     font-size: 12px;
     line-height: 18px;
     opacity: 0.5;
 }
-.file button {
+/* Small icon buttons next to the size: download and copy the curl command */
+.file-action {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    color: rgb(var(--text));
+    background: transparent;
+    border: 0;
+    border-radius: 5px;
+    opacity: 0.45;
+    cursor: pointer;
+    transition: opacity 0.15s, color 0.15s, background 0.15s;
+}
+.file-action:hover {
+    color: rgb(var(--teal));
+    opacity: 1;
+    background: rgba(var(--teal), 0.15);
+}
+.file-action.copied {
+    color: rgb(var(--ok));
+    opacity: 1;
+}
+.file .remove {
     flex-shrink: 0;
     width: 32px;
     height: 32px;
@@ -724,7 +765,7 @@ body.has-files #files {
     cursor: pointer;
     transition: opacity 0.15s, color 0.15s, background 0.15s;
 }
-.file button:hover {
+.file .remove:hover {
     color: rgb(var(--danger));
     opacity: 1;
     background: rgba(var(--danger), 0.15);
@@ -808,7 +849,7 @@ if ($initial_text !== false) {
 <button id="empty" type="button" title="Delete all files (the note text is kept)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>empty</button>
 </div>
 <div id="drop">Drop files to attach them (max <?php print $max_file_size >> 20; ?> MB each)</div>
-<div id="modified"><span id="tip"><div>Upload text: <code id="tip-text"></code></div><div>Upload file: <code id="tip-upload"></code></div></span><button id="theme" type="button" title="Switch light/dark theme"><svg class="icon-sun" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg><svg class="icon-moon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg></button><a id="repo" href="<?php print $repo_url; ?>" target="_blank" rel="noopener noreferrer" title="Source code on GitHub"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.93.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.22.165.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>v<?php print $app_version; ?></a><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M12 7v5l3 2"/></svg><span id="modified-time" title="Last modified"></span><span id="status"></span></div>
+<div id="modified"><span id="tip"><span>Upload text:</span><code id="tip-text"></code><span>Upload file:</span><code id="tip-upload"></code><span>Download file:</span><code id="tip-download"></code></span><button id="theme" type="button" title="Switch light/dark theme"><svg class="icon-sun" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg><svg class="icon-moon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg></button><a id="repo" href="<?php print $repo_url; ?>" target="_blank" rel="noopener noreferrer" title="Source code on GitHub"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.93.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.22.165.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>v<?php print $app_version; ?></a><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M12 7v5l3 2"/></svg><span id="modified-time" title="Last modified"></span><span id="status"></span></div>
 <pre id="printable"></pre>
 <script>
 function updateStatus() {
@@ -1099,19 +1140,44 @@ function fileRow(name, detail, href) {
         label.title = 'Download ' + name;
     }
     meta.appendChild(label);
+    var details = document.createElement('div');
+    details.className = 'details';
+    meta.appendChild(details);
     var size = document.createElement('span');
     size.className = 'size';
     size.textContent = detail;
-    meta.appendChild(size);
+    details.appendChild(size);
     return row;
 }
+
+var DOWNLOAD_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/></svg>';
+var COMMAND_ICONS = '<svg class="icon-copy" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></svg>'
+    + '<svg class="icon-check" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
 
 function renderFiles() {
     filesList.textContent = '';
     files.forEach(function(file) {
-        var chip = fileRow(file.name, formatSize(file.size), window.location.pathname + '?file=' + encodeURIComponent(file.name));
+        var href = window.location.pathname + '?file=' + encodeURIComponent(file.name);
+        var chip = fileRow(file.name, formatSize(file.size), href);
+        var details = chip.querySelector('.details');
+        var download = document.createElement('a');
+        download.className = 'file-action';
+        download.href = href;
+        download.title = 'Download';
+        download.innerHTML = DOWNLOAD_ICON;
+        details.appendChild(download);
+        var command = document.createElement('button');
+        command.type = 'button';
+        command.className = 'file-action';
+        command.title = 'Copy download command (curl)';
+        command.innerHTML = COMMAND_ICONS;
+        command.onclick = function() {
+            copyBlock('curl -O ' + noteUrl + '/' + file.name, command);
+        };
+        details.appendChild(command);
         var remove = document.createElement('button');
         remove.type = 'button';
+        remove.className = 'remove';
         remove.title = 'Delete file';
         remove.textContent = '×';
         remove.onclick = function() {
@@ -1216,7 +1282,8 @@ var modifiedLabel = document.getElementById('modified-time');
 var statusDot = document.getElementById('status');
 var noteUrl = window.location.origin + window.location.pathname;
 document.getElementById('tip-text').textContent = '<command> | curl --data-binary @- ' + noteUrl;
-document.getElementById('tip-upload').textContent = "curl -T <file> '" + noteUrl + "?upload=<name>'";
+document.getElementById('tip-upload').textContent = 'curl -T <file> ' + noteUrl + '/';
+document.getElementById('tip-download').textContent = 'curl -O ' + noteUrl + '/<file>';
 var mtime = <?php print $initial_mtime; ?>;
 
 // Theme toggle: a choice equal to the system preference is forgotten, so the page follows the system again

@@ -1,6 +1,12 @@
 Options -Indexes
 RewriteEngine On
 RewriteRule ^([a-zA-Z0-9_-]+)$ index.php?note=$1 [QSA]
+# PUT/POST /<note>/<file> uploads an attachment (curl -T <file> <note-url>/ appends the file name),
+# GET /<note>/<file> downloads it (curl -O <note-url>/<file>)
+RewriteCond %{REQUEST_METHOD} ^(PUT|POST)$
+RewriteRule ^([a-zA-Z0-9_-]+)/([^/]+)$ index.php?note=$1&upload=$2 [B,QSA,L]
+RewriteCond %{REQUEST_METHOD} ^(GET|HEAD)$
+RewriteRule ^([a-zA-Z0-9_-]+)/([^/]+)$ index.php?note=$1&file=$2 [B,QSA]
 
 <IfModule mod_headers.c>
     Header set X-Robots-Tag: "noindex, nofollow"
