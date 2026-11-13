@@ -7,7 +7,7 @@
 $save_path = rtrim(getenv('NOTES_PATH') ?: '/var/lib/notas', '/');
 
 // Shown in the footer next to the GitHub link. Bump it on each release.
-$app_version = '1.6';
+$app_version = '1.6.1';
 $repo_url = 'https://github.com/joseaguardia/web-notepad';
 
 // Attachment limits: size of each file, and total size of all attachments of all notes.
@@ -642,11 +642,14 @@ body {
 #printable {
     display: none;
 }
-/* Hidden copy of the editor text, used to measure where each block starts */
+/* Hidden copy of the editor text, used to measure where each block starts.
+   Clipped to the editor height, otherwise a long note makes the whole page scroll. */
 #mirror {
     position: absolute;
     top: 0;
     left: 0;
+    height: 100%;
+    overflow: hidden;
     visibility: hidden;
     pointer-events: none;
     box-sizing: border-box;
