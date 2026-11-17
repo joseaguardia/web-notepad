@@ -7,7 +7,7 @@
 $save_path = rtrim(getenv('NOTES_PATH') ?: '/var/lib/notas', '/');
 
 // Shown in the footer next to the GitHub link. Bump it on each release.
-$app_version = '1.6.7';
+$app_version = '1.7.1';
 $repo_url = 'https://github.com/joseaguardia/web-notepad';
 
 // Attachment limits: size of each file, and total size of all attachments of all notes.
@@ -257,6 +257,23 @@ if (isset($_GET['files'])) {
     send_files($files_dir);
 }
 
+// Renew the note: reset its idle time without changing it. Touches the text file if there is one
+// (so other tabs see it through X-Note-Mtime), otherwise the attachments directory.
+if (isset($_GET['renew']) && $method === 'POST') {
+    $lock = fopen($save_path . '/.lock', 'c');
+    flock($lock, LOCK_EX);
+    if (is_file($path)) {
+        touch($path);
+    } elseif (is_dir($files_dir)) {
+        touch($files_dir);
+    } else {
+        fail(404, 'Not found');
+    }
+    header('Content-Type: application/json');
+    print json_encode(['mtime' => note_mtime($path), 'changed' => files_changed($files_dir)]);
+    die;
+}
+
 if ($method === 'POST') {
     $text = $_POST['text'] ?? file_get_contents('php://input');
     if (!is_string($text)) {
@@ -433,12 +450,23 @@ body {
     color: rgb(var(--text));
 }
 /* Dimmed per child rather than on #modified, so the commands popover stays opaque */
-#modified > :not(#cli):not(#expires),
+#modified > :not(#cli):not(#saved),
+#saved > :not(#expires),
 #cli-toggle {
     opacity: 0.6;
 }
 #modified svg {
     flex-shrink: 0;
+}
+/* Fixed minimum width (fits the time plus the #expires pill), so the theme and repo
+   links do not move when "Unsaved note" turns into the time */
+#saved {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    min-width: 200px;
 }
 #repo {
     display: flex;
@@ -489,8 +517,18 @@ body {
     line-height: 20px;
     color: rgb(var(--expires-text));
     background: rgba(var(--primary), 0.12);
+    padding: 0;
+    font-family: inherit;
+    border: 0;
     border-radius: 999px;
-    transition: color 0.3s, background 0.3s;
+    cursor: pointer;
+    transition: color 0.3s, background 0.3s, box-shadow 0.15s;
+}
+#expires:hover {
+    box-shadow: 0 0 0 1px rgba(var(--primary), 0.6);
+}
+#expires.soon:hover {
+    box-shadow: 0 0 0 1px rgba(var(--danger), 0.6);
 }
 #expires[hidden] {
     display: none;
@@ -702,6 +740,46 @@ body {
 }
 .copy-btn:hover + .block-bar {
     opacity: 0.8;
+}
+/* Blocks that just arrived from another device light up for a moment: the gutter bar
+   and a soft background behind the text (#glow, a layer over the editor scrolled like the gutter),
+   fading in and out */
+.block-bar.flash {
+    animation: flash-bar 2.4s ease-in-out;
+}
+@keyframes flash-bar {
+    0%, 100% {
+        opacity: 0;
+        box-shadow: 0 0 0 rgb(var(--primary));
+    }
+    20% {
+        opacity: 1;
+        box-shadow: 0 0 10px rgb(var(--primary));
+    }
+}
+#glow {
+    position: absolute;
+    inset: 1px;
+    overflow: hidden;
+    border-radius: 12px;
+    pointer-events: none;
+}
+#glow-inner {
+    position: relative;
+}
+.block-glow {
+    position: absolute;
+    left: 50px;
+    right: 0;
+    border-radius: 6px;
+    background: linear-gradient(90deg, rgba(var(--primary), 0.22), rgba(var(--primary), 0.08) 60%, rgba(var(--primary), 0));
+    opacity: 0;
+    animation: flash-glow 2.4s ease-in-out;
+}
+@keyframes flash-glow {
+    20% {
+        opacity: 1;
+    }
 }
 .copy-btn.copied + .block-bar {
     background: rgb(var(--ok));
@@ -1039,6 +1117,7 @@ if ($initial_text !== false) {
     print htmlspecialchars($initial_text, ENT_QUOTES, 'UTF-8');
 }
 ?></textarea>
+<div id="glow"><div id="glow-inner"></div></div>
 <div id="gutter"><div id="gutter-inner"></div></div>
 <div id="mirror" aria-hidden="true"></div>
 <button id="copy-all" class="action" type="button" title="Copy all"><svg class="icon-copy" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg><svg class="icon-check" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg><small>copy all</small></button>
@@ -1053,7 +1132,7 @@ if ($initial_text !== false) {
 <button id="empty" type="button" title="Delete all files (the note text is kept)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>empty</button>
 </div>
 <div id="drop">Drop files to attach them (max <?php print $max_file_size >> 20; ?> MB each)</div>
-<div id="modified"><div id="cli"><div id="cli-panel"><div id="cli-list"></div></div><button id="cli-toggle" type="button" aria-expanded="false" title="Command-line usage"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></svg>commands help</button></div><button id="theme" type="button" title="Switch light/dark theme"><svg class="icon-sun" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg><svg class="icon-moon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg></button><a id="repo" href="<?php print $repo_url; ?>" target="_blank" rel="noopener noreferrer" title="Source code on GitHub"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.93.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.22.165.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>v<?php print $app_version; ?></a><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M12 7v5l3 2"/></svg><span id="modified-time" title="Last modified"></span><span id="expires" hidden><span id="expires-fill"></span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg><span id="expires-label"></span></span><span id="status"></span></div>
+<div id="modified"><div id="cli"><div id="cli-panel"><div id="cli-list"></div></div><button id="cli-toggle" type="button" aria-expanded="false" title="Command-line usage"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></svg>commands help</button></div><button id="theme" type="button" title="Switch light/dark theme"><svg class="icon-sun" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg><svg class="icon-moon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg></button><a id="repo" href="<?php print $repo_url; ?>" target="_blank" rel="noopener noreferrer" title="Source code on GitHub"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.93.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.22.165.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>v<?php print $app_version; ?></a><span id="saved"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M12 7v5l3 2"/></svg><span id="modified-time" title="Last modified"></span><button id="expires" type="button" hidden><span id="expires-fill"></span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg><span id="expires-label"></span></button></span><span id="status"></span></div>
 <pre id="printable"></pre>
 <script>
 function updateStatus() {
@@ -1107,6 +1186,26 @@ function applyRemote(request) {
     setMtime(request.getResponseHeader('X-Note-Mtime'));
     updateStatus();
     updateGutter();
+
+    // Light up the blocks that were not in the old text.
+    var known = {};
+    findBlocks(old).forEach(function(block) {
+        known[old.slice(block.start, block.end)] = true;
+    });
+    findBlocks(text).forEach(function(block, i) {
+        if (!known[text.slice(block.start, block.end)]) {
+            var bar = blockBars[i];
+            bar.classList.add('flash');
+            var glow = document.createElement('div');
+            glow.className = 'block-glow';
+            glow.style.top = (parseFloat(bar.style.top) - 4) + 'px';
+            glow.style.height = (parseFloat(bar.style.height) + 8) + 'px';
+            glow.onanimationend = function() {
+                this.remove();
+            };
+            glowInner.appendChild(glow);
+        }
+    });
 }
 
 // Load changes made on other devices, but only when everything typed here is already saved.
@@ -1127,6 +1226,10 @@ function checkRemote() {
         }
         if (request.status === 200 || request.status === 404) {
             applyRemote(request);
+        } else if (request.status === 204) {
+
+            // Same text, but it may have been renewed elsewhere.
+            setMtime(request.getResponseHeader('X-Note-Mtime'));
         }
     };
     request.onerror = function() {
@@ -1242,7 +1345,7 @@ var COPY_ICONS = '<svg class="icon-copy" width="18" height="18" viewBox="0 0 24 
     + '<svg class="icon-check" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
 
 function syncGutterScroll() {
-    gutterInner.style.transform = 'translateY(' + (-textarea.scrollTop) + 'px)';
+    gutterInner.style.transform = glowInner.style.transform = 'translateY(' + (-textarea.scrollTop) + 'px)';
 }
 
 // Rebuild the copy buttons, placing each one at the first line of its block.
@@ -1272,6 +1375,7 @@ function updateGutter() {
     mirror.appendChild(document.createTextNode(text.slice(last)));
 
     gutterInner.textContent = '';
+    blockBars = [];
     blocks.forEach(function(block, i) {
         var button = document.createElement('button');
         button.type = 'button';
@@ -1295,10 +1399,12 @@ function updateGutter() {
         bar.style.top = markers[i].offsetTop + 'px';
         bar.style.height = (endMarkers[i].offsetTop + endMarkers[i].offsetHeight - markers[i].offsetTop) + 'px';
         gutterInner.appendChild(bar);
+        blockBars.push(bar);
     });
     syncGutterScroll();
 }
 
+var blockBars = [];
 var gutterQueued = false;
 function scheduleGutter() {
     if (!gutterQueued) {
@@ -1334,7 +1440,7 @@ function showExpiry(changed) {
     expiresFill.style.width = (seconds / NOTE_TTL * 100) + '%';
     expires.classList.toggle('soon', left <= 10);
     expires.title = 'Auto-delete in ' + (seconds < 60 ? 'less than a minute' : left + (left === 1 ? ' minute' : ' minutes'))
-        + '. Edit the note to cancel it.';
+        + '. Click to renew it (or edit the note).';
     expiresLabel.textContent = (seconds < 60 ? '<1' : left) + ' min';
 }
 
@@ -1598,6 +1704,7 @@ systemLight.addEventListener('change', function() {
 });
 
 var gutterInner = document.getElementById('gutter-inner');
+var glowInner = document.getElementById('glow-inner');
 var mirror = document.getElementById('mirror');
 var printable = document.getElementById('printable');
 var refreshButton = document.getElementById('refresh');
@@ -1698,6 +1805,20 @@ refreshButton.onclick = function() {
     };
     request.onloadend = function() {
         refreshButton.disabled = false;
+    };
+    request.send();
+};
+
+// Renew the note so the idle deletion starts over.
+expires.onclick = function() {
+    var request = new XMLHttpRequest();
+    request.open('POST', window.location.pathname + '?renew', true);
+    request.onload = function() {
+        if (request.status === 200) {
+            var data = JSON.parse(request.responseText);
+            filesChanged = data.changed;
+            setMtime(data.mtime);
+        }
     };
     request.send();
 };
