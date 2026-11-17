@@ -7,7 +7,7 @@
 $save_path = rtrim(getenv('NOTES_PATH') ?: '/var/lib/notas', '/');
 
 // Shown in the footer next to the GitHub link. Bump it on each release.
-$app_version = '1.6.1';
+$app_version = '1.6.7';
 $repo_url = 'https://github.com/joseaguardia/web-notepad';
 
 // Attachment limits: size of each file, and total size of all attachments of all notes.
@@ -376,6 +376,7 @@ body {
     --ok: 110, 231, 183;
     --warn: 245, 165, 36;
     --danger: 242, 139, 150;
+    --expires-text: 214, 246, 252;
     --selection: #0a6f88;
     --selection-text: #fff;
     --code-bg: rgba(0, 0, 0, 0.25);
@@ -397,6 +398,7 @@ body {
     --ok: 5, 150, 105;
     --warn: 217, 119, 6;
     --danger: 220, 38, 38;
+    --expires-text: 0, 66, 84;
     --selection: #b3e7eb;
     --selection-text: rgb(0, 25, 35);
     --code-bg: rgba(0, 66, 84, 0.08);
@@ -470,43 +472,47 @@ body {
 #cli.open #cli-toggle {
     color: rgb(var(--primary));
 }
-/* Time left until the note is deleted for not being changed */
+/* Time left until the note is deleted for not being changed: a pill whose background
+   empties from full (just changed) to nothing (deleted), with the icon and minutes on top */
 #expires {
+    position: relative;
     display: flex;
     flex-shrink: 0;
     align-items: center;
+    justify-content: center;
     gap: 4px;
+    width: 104px;
+    height: 20px;
     margin-left: 8px;
-    transition: color 0.3s;
+    overflow: hidden;
+    font-size: 13px;
+    line-height: 20px;
+    color: rgb(var(--expires-text));
+    background: rgba(var(--primary), 0.12);
+    border-radius: 999px;
+    transition: color 0.3s, background 0.3s;
 }
 #expires[hidden] {
     display: none;
 }
-/* Dimmed through its color rather than opacity, so it can turn full pink (clear button's color) near the end */
-#expires svg {
-    color: rgba(var(--text), 0.6);
-    transition: color 0.3s;
-}
-#expires.soon svg {
+#expires.soon {
     color: rgb(var(--danger));
-}
-/* Remaining time as a bar that empties from full (just changed) to nothing (deleted) */
-#expires-bar {
-    width: 96px;
-    height: 6px;
-    overflow: hidden;
-    background: rgba(var(--text), 0.15);
-    border-radius: 3px;
+    background: rgba(var(--danger), 0.12);
 }
 #expires-fill {
-    display: block;
-    height: 100%;
-    background: rgba(var(--text), 0.6);
-    border-radius: inherit;
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    background: rgba(var(--primary), 0.35);
     transition: width 1s linear, background 0.3s;
 }
 #expires.soon #expires-fill {
-    background: rgb(var(--danger));
+    background: rgba(var(--danger), 0.25);
+}
+#expires svg,
+#expires-label {
+    position: relative;
 }
 #status {
     flex-shrink: 0;
@@ -1047,7 +1053,7 @@ if ($initial_text !== false) {
 <button id="empty" type="button" title="Delete all files (the note text is kept)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>empty</button>
 </div>
 <div id="drop">Drop files to attach them (max <?php print $max_file_size >> 20; ?> MB each)</div>
-<div id="modified"><div id="cli"><div id="cli-panel"><div id="cli-list"></div></div><button id="cli-toggle" type="button" aria-expanded="false" title="Command-line usage"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></svg>commands help</button></div><button id="theme" type="button" title="Switch light/dark theme"><svg class="icon-sun" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg><svg class="icon-moon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg></button><a id="repo" href="<?php print $repo_url; ?>" target="_blank" rel="noopener noreferrer" title="Source code on GitHub"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.93.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.22.165.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>v<?php print $app_version; ?></a><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M12 7v5l3 2"/></svg><span id="modified-time" title="Last modified"></span><span id="expires" hidden><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg><span id="expires-bar"><span id="expires-fill"></span></span></span><span id="status"></span></div>
+<div id="modified"><div id="cli"><div id="cli-panel"><div id="cli-list"></div></div><button id="cli-toggle" type="button" aria-expanded="false" title="Command-line usage"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></svg>commands help</button></div><button id="theme" type="button" title="Switch light/dark theme"><svg class="icon-sun" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg><svg class="icon-moon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg></button><a id="repo" href="<?php print $repo_url; ?>" target="_blank" rel="noopener noreferrer" title="Source code on GitHub"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.93.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.22.165.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>v<?php print $app_version; ?></a><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M12 7v5l3 2"/></svg><span id="modified-time" title="Last modified"></span><span id="expires" hidden><span id="expires-fill"></span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg><span id="expires-label"></span></span><span id="status"></span></div>
 <pre id="printable"></pre>
 <script>
 function updateStatus() {
@@ -1329,6 +1335,7 @@ function showExpiry(changed) {
     expires.classList.toggle('soon', left <= 10);
     expires.title = 'Auto-delete in ' + (seconds < 60 ? 'less than a minute' : left + (left === 1 ? ' minute' : ' minutes'))
         + '. Edit the note to cancel it.';
+    expiresLabel.textContent = (seconds < 60 ? '<1' : left) + ' min';
 }
 
 function setMtime(header) {
@@ -1608,7 +1615,9 @@ var filesChanged = <?php print files_changed($files_dir); ?>;
 var NOTE_TTL = <?php print $note_ttl; ?>;
 var serverOffset = <?php print time(); ?> - Date.now() / 1000;
 var expires = document.getElementById('expires');
-var expiresFill = document.getElementById('expires-fill');var filesList = document.getElementById('files-list');
+var expiresFill = document.getElementById('expires-fill');
+var expiresLabel = document.getElementById('expires-label');
+var filesList = document.getElementById('files-list');
 var filesCount = document.getElementById('files-count');
 var emptyButton = document.getElementById('empty');
 var fileInput = document.getElementById('file-input');
