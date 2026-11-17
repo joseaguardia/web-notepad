@@ -30,6 +30,7 @@ ENV NOTES_PATH=/var/lib/notas \
     MAX_NOTE_SIZE_MB=2 \
     MAX_NOTES=25 \
     NOTE_TTL_MINUTES=45 \
+    MAX_SECRETS=25 \
     PHP_POST_MAX_SIZE=8M
 
 USER www-data

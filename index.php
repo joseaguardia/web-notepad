@@ -7,7 +7,7 @@
 $save_path = rtrim(getenv('NOTES_PATH') ?: '/var/lib/notas', '/');
 
 // Shown in the footer next to the GitHub link. Bump it on each release.
-$app_version = '1.7.2';
+$app_version = '2.0';
 $repo_url = 'https://github.com/joseaguardia/web-notepad';
 
 // Attachment limits: size of each file, and total size of all attachments of all notes.
@@ -23,27 +23,17 @@ $max_notes = (int) (getenv('MAX_NOTES') ?: 25);
 $ttl_env = getenv('NOTE_TTL_MINUTES');
 $note_ttl = ($ttl_env === false || $ttl_env === '' ? 45 : (int) $ttl_env) * 60;
 
+// Secrets: a note turned into a one-time link. They live in "$save_path/.secrets/", outside the note TTL,
+// until opened or until the chosen expiry. Once opened, its files can be downloaded for $secret_window seconds.
+$max_secrets = (int) (getenv('MAX_SECRETS') ?: 25);
+$secret_expiries = [1, 24, 168];
+$secret_window = 600;
+
 // Disable caching. The note URL is its only secret, so never send it as a referrer.
 header('Cache-Control: no-store');
 header('X-Content-Type-Options: nosniff');
 header('Referrer-Policy: no-referrer');
 header("Content-Security-Policy: frame-ancestors 'self'");
-
-// If no note name is provided, or if the name is too long, or if it contains invalid characters.
-// The D modifier stops $ from accepting a trailing newline.
-if (!is_string($_GET['note'] ?? null) || !preg_match('/^[a-zA-Z0-9_-]{1,64}$/D', $_GET['note'])) {
-
-    // Generate a name with 5 random unambiguous characters. Redirect to it.
-    $chars = '234579abcdefghjkmnpqrstwxyz';
-    $name = '';
-    for ($i = 0; $i < 5; $i++) {
-        $name .= $chars[random_int(0, strlen($chars) - 1)];
-    }
-    header("Location: $name");
-    die;
-}
-
-$path = $save_path . '/' . $_GET['note'];
 
 // Version of a note: hash of its contents, or empty if it does not exist.
 function note_version($path) {
@@ -114,10 +104,96 @@ function check_note_limit($save_path, $note, $max_notes) {
     }
 }
 
-// Delete the notes not changed for $ttl seconds, text and attachments. Runs at most once a minute.
-// A note's last change is the newest mtime of its text file and its attachments directory
-// (the directory changes on every upload, delete, and when an upload starts its temp file).
-function delete_expired_notes($save_path, $ttl) {
+// Delete the text and attachments of a note (or of a secret, which has the same layout).
+function delete_note($text, $dir) {
+    if (is_file($text)) {
+        unlink($text);
+    }
+    foreach (list_files($dir) as $file) {
+        unlink("$dir/{$file['name']}");
+    }
+    @rmdir($dir);
+}
+
+// A secret is "$save_path/.secrets/<id>/" holding "data" (the note text and the list of files, encrypted),
+// one encrypted file per attachment named "0", "1"…, "expires" (Unix time) and, once opened, "opened".
+// The key is not stored: it only travels in the link, after the "#", and comes back in the POST body.
+// Ids are 128 random bits and keys 256, both in base64url.
+function valid_secret_id($id) {
+    return is_string($id) && preg_match('/^[a-zA-Z0-9_-]{22}$/D', $id);
+}
+
+function new_secret_id() {
+    return rtrim(strtr(base64_encode(random_bytes(16)), '+/', '-_'), '=');
+}
+
+function secret_ids($secrets_path) {
+    return array_values(array_filter(is_dir($secrets_path) ? scandir($secrets_path) : [], 'valid_secret_id'));
+}
+
+function secret_expires($dir) {
+    return is_file("$dir/expires") ? (int) file_get_contents("$dir/expires") : 0;
+}
+
+// Directory of a live secret in the given state (opened or not), or null if missing or expired.
+function find_secret($secrets_path, $id, $opened) {
+    $dir = "$secrets_path/$id";
+    if (!valid_secret_id($id) || !is_dir($dir) || is_file("$dir/opened") !== $opened || secret_expires($dir) < time()) {
+        return null;
+    }
+    return $dir;
+}
+
+function delete_secret($dir) {
+    foreach (array_diff(scandir($dir) ?: [], ['.', '..']) as $entry) {
+        is_dir("$dir/$entry") ? delete_secret("$dir/$entry") : unlink("$dir/$entry");
+    }
+    @rmdir($dir);
+}
+
+// AES-256-GCM: stored as IV (12 bytes), tag (16) and ciphertext. unseal() returns false with a wrong key.
+function seal($plain, $key) {
+    $iv = random_bytes(12);
+    $cipher = openssl_encrypt($plain, 'aes-256-gcm', $key, OPENSSL_RAW_DATA, $iv, $tag);
+    return $iv . $tag . $cipher;
+}
+
+function unseal($sealed, $key) {
+    return openssl_decrypt(substr($sealed, 28), 'aes-256-gcm', $key, OPENSSL_RAW_DATA, substr($sealed, 0, 12), substr($sealed, 12, 16));
+}
+
+// Key sent by the browser in the POST body, or null if missing or malformed.
+function posted_key() {
+    $key = is_string($_POST['key'] ?? null) ? base64_decode(strtr($_POST['key'], '-_', '+/'), true) : false;
+    return $key !== false && strlen($key) === 32 ? $key : null;
+}
+
+// Total size of all attachments, of notes and of secrets.
+function attachments_size($save_path, $except) {
+    $total = 0;
+    foreach (array_merge(glob("$save_path/*.files/*") ?: [], glob("$save_path/.secrets/*/[0-9]*") ?: []) as $file) {
+        if ($file !== $except) {
+            $total += filesize($file);
+        }
+    }
+    return $total;
+}
+
+// Always as a download and sandboxed, so an uploaded HTML or SVG can never run in this origin.
+function send_attachment($file, $name) {
+    header('Content-Type: application/octet-stream');
+    header('Content-Disposition: attachment; filename="' . $name . '"');
+    header('Content-Length: ' . filesize($file));
+    header('X-Content-Type-Options: nosniff');
+    header("Content-Security-Policy: default-src 'none'; sandbox");
+    readfile($file);
+    die;
+}
+
+// Delete the notes not changed for $ttl seconds (0 keeps them), text and attachments, and the expired secrets.
+// Runs at most once a minute. A note's last change is the newest mtime of its text file and its attachments
+// directory (the directory changes on every upload, delete, and when an upload starts its temp file).
+function delete_expired($save_path, $ttl) {
     $stamp = "$save_path/.cleanup";
     clearstatcache();
     if (is_file($stamp) && filemtime($stamp) > time() - 60) {
@@ -126,18 +202,17 @@ function delete_expired_notes($save_path, $ttl) {
     touch($stamp);
     $lock = fopen($save_path . '/.lock', 'c');
     flock($lock, LOCK_EX);
-    foreach (array_keys(note_names($save_path)) as $name) {
+    foreach ($ttl > 0 ? array_keys(note_names($save_path)) : [] as $name) {
         $text = "$save_path/$name";
         $dir = "$text.files";
         $changed = max(is_file($text) ? filemtime($text) : 0, is_dir($dir) ? filemtime($dir) : 0);
         if ($changed && $changed < time() - $ttl) {
-            if (is_file($text)) {
-                unlink($text);
-            }
-            foreach (list_files($dir) as $file) {
-                unlink("$dir/{$file['name']}");
-            }
-            @rmdir($dir);
+            delete_note($text, $dir);
+        }
+    }
+    foreach (secret_ids("$save_path/.secrets") as $id) {
+        if (secret_expires("$save_path/.secrets/$id") < time()) {
+            delete_secret("$save_path/.secrets/$id");
         }
     }
     flock($lock, LOCK_UN);
@@ -151,12 +226,84 @@ function fail($code, $message) {
     die;
 }
 
-$files_dir = $path . '.files';
 $method = $_SERVER['REQUEST_METHOD'];
+$secrets_path = "$save_path/.secrets";
+delete_expired($save_path, $note_ttl);
 
-if ($note_ttl > 0) {
-    delete_expired_notes($save_path, $note_ttl);
+// Secrets, reached at "<base>/?s=<id>" (any note URL works too). A GET only shows a page with an "open" button,
+// so link previews do not burn it. Opening (POST) moves it to a new random id that only the opener knows,
+// marked as opened: the text comes in the answer and the files can be downloaded with that id for a while.
+// Both need the key in the POST body; a wrong key leaves the secret untouched.
+$secret = null;
+if (isset($_GET['s'])) {
+    if (isset($_GET['file']) && $method === 'POST') {
+        $dir = find_secret($secrets_path, $_GET['s'], true);
+        if (!$dir || !is_string($_GET['file']) || !ctype_digit($_GET['file']) || !is_file($file = "$dir/{$_GET['file']}")) {
+            fail(404, 'Not found');
+        }
+        if (!($key = posted_key()) || ($data = unseal(file_get_contents($file), $key)) === false) {
+            fail(403, 'Wrong key');
+        }
+        header('Content-Type: application/octet-stream');
+        header('Content-Disposition: attachment');
+        header("Content-Security-Policy: default-src 'none'; sandbox");
+        print $data;
+        die;
+    }
+    if (isset($_GET['open']) && $method === 'POST') {
+        $lock = fopen($save_path . '/.lock', 'c');
+        flock($lock, LOCK_EX);
+        if (!$dir = find_secret($secrets_path, $_GET['s'], false)) {
+            fail(404, 'This secret does not exist: it was already opened or it expired.');
+        }
+        $data = is_file("$dir/data") ? file_get_contents("$dir/data") : '';
+        if (!($key = posted_key()) || ($data = unseal($data, $key)) === false) {
+            fail(403, 'This link is not complete: check that it was copied whole, including the part after the "#".');
+        }
+        $data = json_decode($data, true);
+        $token = new_secret_id();
+        $opened = "$secrets_path/$token";
+        rename($dir, $opened);
+        unlink("$opened/data");
+        file_put_contents("$opened/expires", time() + $secret_window);
+        touch("$opened/opened");
+        if (!$data['files']) {
+            delete_secret($opened);
+        }
+        header('Content-Type: application/json');
+        print json_encode(['token' => $token, 'text' => $data['text'], 'files' => $data['files'], 'until' => time() + $secret_window]);
+        die;
+    }
+    if ($method !== 'GET' && $method !== 'HEAD') {
+        fail(405, 'Method not allowed');
+    }
+    $dir = find_secret($secrets_path, $_GET['s'], false);
+    $secret = ['id' => $dir ? $_GET['s'] : '', 'expires' => $dir ? secret_expires($dir) : 0];
+    if (!$dir) {
+        http_response_code(404);
+    }
+
+    // Only the page below is left: drop every other parameter so no note route can run.
+    $_GET = [];
 }
+
+// If no note name is provided, or if the name is too long, or if it contains invalid characters.
+// The D modifier stops $ from accepting a trailing newline.
+if (!$secret && (!is_string($_GET['note'] ?? null) || !preg_match('/^[a-zA-Z0-9_-]{1,64}$/D', $_GET['note']))) {
+
+    // Generate a name with 5 random unambiguous characters. Redirect to it.
+    $chars = '234579abcdefghjkmnpqrstwxyz';
+    $name = '';
+    for ($i = 0; $i < 5; $i++) {
+        $name .= $chars[random_int(0, strlen($chars) - 1)];
+    }
+    header("Location: $name");
+    die;
+}
+
+// The secret page uses a path that can never exist (note names have no dots), so it shows no note.
+$path = $save_path . '/' . ($secret ? '.none' : $_GET['note']);
+$files_dir = $path . '.files';
 
 // Upload an attachment: the raw request body is the file, e.g. curl --upload-file photo.png '<url>?upload=photo.png'.
 // The rewrite also maps PUT/POST <url>/<file> here, so curl --upload-file photo.png <url>/ names it automatically
@@ -206,13 +353,7 @@ if (isset($_GET['upload']) && ($method === 'POST' || $method === 'PUT')) {
     $lock = fopen($save_path . '/.lock', 'c');
     flock($lock, LOCK_EX);
     $target = "$files_dir/$name";
-    $total = 0;
-    foreach (glob($save_path . '/*.files/*') ?: [] as $file) {
-        if ($file !== $target) {
-            $total += filesize($file);
-        }
-    }
-    if ($total + $copied > $max_total_size) {
+    if (attachments_size($save_path, $target) + $copied > $max_total_size) {
         fail(507, 'Attachment storage full (max ' . ($max_total_size >> 20) . ' MB in total)');
     }
     rename($temp, $target);
@@ -234,18 +375,12 @@ if ((isset($_GET['delete']) || isset($_GET['empty'])) && $method === 'POST') {
     send_files($files_dir);
 }
 
-// Download an attachment. Always as a download and sandboxed, so an uploaded HTML or SVG can never run in this origin.
+// Download an attachment.
 if (isset($_GET['file'])) {
     if (!valid_file_name($_GET['file']) || !is_file($file = "$files_dir/{$_GET['file']}")) {
         fail(404, 'Not found');
     }
-    header('Content-Type: application/octet-stream');
-    header('Content-Disposition: attachment; filename="' . $_GET['file'] . '"');
-    header('Content-Length: ' . filesize($file));
-    header('X-Content-Type-Options: nosniff');
-    header("Content-Security-Policy: default-src 'none'; sandbox");
-    readfile($file);
-    die;
+    send_attachment($file, $_GET['file']);
 }
 
 // List of attachments as JSON. With since=<version> answers 204 when unchanged (used by the browser's polling).
@@ -255,6 +390,45 @@ if (isset($_GET['files'])) {
         die;
     }
     send_files($files_dir);
+}
+
+// Turn the note into a secret that expires in ?secret=<hours> if not opened: its text and attachments
+// move to a new random id and the note is gone. Refused with 409 if the text changed since "base".
+if (isset($_GET['secret']) && $method === 'POST') {
+    $hours = is_string($_GET['secret']) ? (int) $_GET['secret'] : 0;
+    if (!in_array($hours, $secret_expiries, true)) {
+        fail(400, 'Invalid expiry');
+    }
+    $lock = fopen($save_path . '/.lock', 'c');
+    flock($lock, LOCK_EX);
+    if (isset($_POST['base']) && $_POST['base'] !== note_version($path)) {
+        fail(409, 'This note changed on another device');
+    }
+    if (!is_file($path) && !list_files($files_dir)) {
+        fail(404, 'The note is empty');
+    }
+    if (count(secret_ids($secrets_path)) >= $max_secrets) {
+        fail(507, "Too many secrets (max $max_secrets at the same time)");
+    }
+    if (!is_dir($secrets_path) && !@mkdir($secrets_path, 0755) && !is_dir($secrets_path)) {
+        fail(500, 'Cannot create secrets directory');
+    }
+    $id = new_secret_id();
+    $key = random_bytes(32);
+    $dir = "$secrets_path/$id";
+    mkdir($dir, 0755);
+    $expires = time() + $hours * 3600;
+    file_put_contents("$dir/expires", $expires);
+    $files = list_files($files_dir);
+    foreach ($files as $i => $file) {
+        file_put_contents("$dir/$i", seal(file_get_contents("$files_dir/{$file['name']}"), $key));
+    }
+    $text = is_file($path) ? file_get_contents($path) : '';
+    file_put_contents("$dir/data", seal(json_encode(['text' => $text, 'files' => $files], JSON_INVALID_UTF8_SUBSTITUTE), $key));
+    delete_note($path, $files_dir);
+    header('Content-Type: application/json');
+    print json_encode(['id' => $id, 'key' => rtrim(strtr(base64_encode($key), '+/', '-_'), '='), 'expires' => $expires]);
+    die;
 }
 
 // Renew the note: reset its idle time without changing it. Touches the text file if there is one
@@ -314,7 +488,7 @@ if ($method === 'POST') {
 
 // Print raw file when explicitly requested, or if the client is curl or wget.
 $agent = $_SERVER['HTTP_USER_AGENT'] ?? '';
-if (isset($_GET['raw']) || strpos($agent, 'curl') === 0 || strpos($agent, 'Wget') === 0) {
+if (!$secret && (isset($_GET['raw']) || strpos($agent, 'curl') === 0 || strpos($agent, 'Wget') === 0)) {
 
     // Read the note once so the text and its version always match.
     $text = is_file($path) ? file_get_contents($path) : false;
@@ -344,7 +518,7 @@ $initial_files = list_files($files_dir);
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title><?php print htmlspecialchars($_GET['note'], ENT_QUOTES, 'UTF-8'); ?></title>
+<title><?php print $secret ? 'Secret' : htmlspecialchars($_GET['note'], ENT_QUOTES, 'UTF-8'); ?></title>
 <link rel="icon" href="favicon.ico" sizes="any">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -400,6 +574,7 @@ body {
     --code-bg: rgba(0, 0, 0, 0.25);
     --shadow: rgba(0, 0, 0, 0.35);
     --shadow-soft: rgba(0, 0, 0, 0.25);
+    --backdrop: rgba(0, 0, 0, 0.55);
 }
 :root[data-theme="light"] {
     color-scheme: light;
@@ -423,6 +598,7 @@ body {
     --code-bg: rgba(0, 66, 84, 0.08);
     --shadow: rgba(0, 25, 35, 0.12);
     --shadow-soft: rgba(0, 25, 35, 0.10);
+    --backdrop: rgba(0, 25, 35, 0.45);
 }
 button {
     font-family: inherit;
@@ -452,7 +628,7 @@ body {
     color: rgb(var(--footer-text));
 }
 /* Dimmed per child rather than on #modified, so the commands popover stays opaque */
-#modified > :not(#cli):not(#saved),
+#modified > :not(#cli):not(#saved):not(#secret-info),
 #saved > :not(#expires),
 #cli-toggle {
     opacity: 0.6;
@@ -895,6 +1071,145 @@ body {
     bottom: 216px;
     --accent: var(--teal);
 }
+#make-secret {
+    bottom: 304px;
+}
+/* Cards: the dialog that turns the note into a secret, and the page of a secret before opening it */
+.card {
+    box-sizing: border-box;
+    width: min(460px, calc(100vw - 32px));
+    padding: 24px;
+    font: 15px/22px var(--mono);
+    color: rgb(var(--text));
+    background: rgb(var(--surface));
+    border: 1px solid rgba(var(--primary), 0.25);
+    border-radius: 12px;
+    box-shadow: 0 12px 32px var(--shadow);
+}
+.card h2 {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0 0 12px;
+    font-size: 18px;
+    font-weight: 500;
+    color: rgb(var(--primary));
+}
+.card p {
+    margin: 0 0 16px;
+}
+.card .muted {
+    opacity: 0.6;
+}
+.card .error {
+    color: rgb(var(--danger));
+}
+.choices {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.choices.end {
+    justify-content: flex-end;
+    margin-top: 16px;
+}
+.card-button {
+    flex: 1;
+    height: 38px;
+    padding: 0 14px;
+    font-size: 14px;
+    cursor: pointer;
+    --accent: var(--primary);
+    color: rgb(var(--accent));
+    background: rgba(var(--accent), 0.08);
+    border: 1px solid rgba(var(--accent), 0.35);
+    border-radius: 8px;
+    transition: background 0.15s, border-color 0.15s;
+}
+.card-button.secondary {
+    flex: 0 0 auto;
+    --accent: var(--neutral);
+}
+.card-button:not(:disabled):hover {
+    background: rgba(var(--accent), 0.2);
+    border-color: rgba(var(--accent), 0.7);
+}
+.card-button:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+.link {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.link code {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    padding: 6px 10px;
+    font: 14px/22px var(--mono);
+    background: var(--code-bg);
+    border-radius: 6px;
+}
+.link .file-action {
+    width: 32px;
+    height: 32px;
+}
+#secret-dialog {
+    margin: auto;
+}
+#secret-expires {
+    margin: 12px 0 0;
+}
+#secret-dialog::backdrop {
+    background: var(--backdrop);
+}
+/* Secret page: only the card until it is opened, then the usual editor (read-only) and files panel */
+#gate {
+    position: absolute;
+    top: 20px;
+    right: 0;
+    bottom: var(--footer-height);
+    left: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+body.secret-view:not(.opened) .container,
+body.secret-view:not(.opened) #files,
+body.opened #gate {
+    display: none;
+}
+/* The one-time warning on the secret page */
+.once {
+    display: flex;
+    gap: 12px;
+    margin: 0 0 16px;
+    padding: 12px 14px;
+    background: rgba(var(--warn), 0.12);
+    border: 1px solid rgba(var(--warn), 0.5);
+    border-radius: 8px;
+}
+.once svg {
+    flex-shrink: 0;
+    color: rgb(var(--warn));
+}
+.once strong {
+    display: block;
+    margin-bottom: 2px;
+    font-size: 16px;
+    font-weight: 500;
+    color: rgb(var(--warn));
+}
+#secret-info {
+    margin-right: auto;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
 /* Attachments panel: hidden until the first file, then splits the page about 80/20
    (side by side, or stacked on narrow screens) */
 :root {
@@ -1113,9 +1428,9 @@ body.dragging #drop {
 }
 </style>
 </head>
-<body>
+<body<?php if ($secret) { print ' class="secret-view"'; } ?>>
 <div class="container">
-<textarea id="content"><?php
+<textarea id="content"<?php if ($secret) { print ' readonly placeholder="No text, only files"'; } ?>><?php
 if ($initial_text !== false) {
     print htmlspecialchars($initial_text, ENT_QUOTES, 'UTF-8');
 }
@@ -1124,18 +1439,55 @@ if ($initial_text !== false) {
 <div id="gutter"><div id="gutter-inner"></div></div>
 <div id="mirror" aria-hidden="true"></div>
 <button id="copy-all" class="action" type="button" title="Copy all"><svg class="icon-copy" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg><svg class="icon-check" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg><small>copy all</small></button>
+<?php if (!$secret): ?>
 <button id="refresh" class="action" type="button" title="This note changed on another device: click to load the server version"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg><small>refresh</small></button>
 <button id="clear" class="action" type="button" title="Clear note"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m16 22-1-4"/><path d="M19 14a1 1 0 0 0 1-1v-1a2 2 0 0 0-2-2h-3a1 1 0 0 1-1-1V4a2 2 0 0 0-4 0v5a1 1 0 0 1-1 1H6a2 2 0 0 0-2 2v1a1 1 0 0 0 1 1"/><path d="M5 14h14l1.973 6.767A1 1 0 0 1 20 22H4a1 1 0 0 1-.973-1.233z"/><path d="m8 22 1-4"/></svg><small>clear</small></button>
 <button id="attach" class="action" type="button" title="Attach file (or drop files anywhere)"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg><small>attach file</small></button>
+<button id="make-secret" class="action" type="button" title="Make it a secret: turn this note into a one-time link"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".5" fill="currentColor"/></svg><small>make it a secret</small></button>
 <input id="file-input" type="file" multiple hidden>
+<?php endif; ?>
 </div>
 <div id="files">
 <div id="files-title">Files <span id="files-count">0</span></div>
 <div id="files-list"></div>
+<?php if (!$secret): ?>
 <button id="empty" type="button" title="Delete all files (the note text is kept)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>empty</button>
+<?php endif; ?>
 </div>
+<?php if ($secret): ?>
+<div id="gate"><div class="card">
+<h2><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>Secret</h2>
+<?php if ($secret['id']): ?>
+<p>Someone shared a secret with you.</p>
+<div class="once"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg><div><strong>It can be opened only once</strong>Opening it deletes it from the server, so copy or download what you need right away.</div></div>
+<p id="gate-expires" class="muted"></p>
+<p id="gate-error" class="error" hidden></p>
+<div class="choices"><button id="open-secret" class="card-button" type="button">open secret</button></div>
+<?php else: ?>
+<p>This secret does not exist: it was already opened or it expired.</p>
+<?php endif; ?>
+</div></div>
+<?php else: ?>
 <div id="drop">Drop files to attach them (max <?php print $max_file_size >> 20; ?> MB each)</div>
-<div id="modified"><div id="cli"><div id="cli-panel"><div id="cli-list"></div></div><button id="cli-toggle" type="button" aria-expanded="false" title="Command-line usage"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></svg>commands help</button></div><button id="theme" type="button" title="Switch light/dark theme"><svg class="icon-sun" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg><svg class="icon-moon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg></button><a id="repo" href="<?php print $repo_url; ?>" target="_blank" rel="noopener noreferrer" title="Source code on GitHub"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.93.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.22.165.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>v<?php print $app_version; ?></a><span id="saved"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M12 7v5l3 2"/></svg><span id="modified-time" title="Last modified"></span><button id="expires" type="button" hidden><span id="expires-fill"></span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg><span id="expires-label"></span></button></span><span id="status"></span></div>
+<dialog id="secret-dialog" class="card">
+<div id="secret-ask">
+<h2><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>Make it a secret</h2>
+<p>The text and files of this note become a link that can be opened only once, and the note is deleted.</p>
+<p class="muted">If nobody opens it, it expires in:</p>
+<div class="choices"><?php foreach ($secret_expiries as $hours): ?><button class="card-button" type="button" data-hours="<?php print $hours; ?>"><?php print $hours === 1 ? '1 hour' : ($hours < 168 ? ($hours / 24) . ' day' . ($hours > 24 ? 's' : '') : ($hours / 168) . ' week' . ($hours > 168 ? 's' : '')); ?></button><?php endforeach; ?></div>
+<p id="secret-error" class="error" hidden></p>
+<div class="choices end"><button class="card-button secondary secret-close" type="button">cancel</button></div>
+</div>
+<div id="secret-done" hidden>
+<h2><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>Secret ready</h2>
+<p>Share this link. It can be opened only once.</p>
+<div class="link"><code id="secret-link"></code><button id="secret-copy" class="file-action" type="button" title="Copy link"></button></div>
+<p id="secret-expires" class="muted"></p>
+<div class="choices end"><button class="card-button secondary secret-close" type="button">close</button></div>
+</div>
+</dialog>
+<?php endif; ?>
+<div id="modified"><?php if ($secret): ?><span id="secret-info"></span><?php else: ?><div id="cli"><div id="cli-panel"><div id="cli-list"></div></div><button id="cli-toggle" type="button" aria-expanded="false" title="Command-line usage"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></svg>commands help</button></div><?php endif; ?><button id="theme" type="button" title="Switch light/dark theme"><svg class="icon-sun" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg><svg class="icon-moon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg></button><a id="repo" href="<?php print $repo_url; ?>" target="_blank" rel="noopener noreferrer" title="Source code on GitHub"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.93.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.22.165.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>v<?php print $app_version; ?></a><?php if (!$secret): ?><span id="saved"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M12 7v5l3 2"/></svg><span id="modified-time" title="Last modified"></span><button id="expires" type="button" hidden><span id="expires-fill"></span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg><span id="expires-label"></span></button></span><span id="status"></span><?php endif; ?></div>
 <pre id="printable"></pre>
 <script>
 function updateStatus() {
@@ -1631,6 +1983,139 @@ function isFileDrag(e) {
 }
 
 var textarea = document.getElementById('content');
+var gutterInner = document.getElementById('gutter-inner');
+var glowInner = document.getElementById('glow-inner');
+var mirror = document.getElementById('mirror');
+var printable = document.getElementById('printable');
+// Theme toggle: a choice equal to the system preference is forgotten, so the page follows the system again
+var systemLight = matchMedia('(prefers-color-scheme: light)');
+function systemTheme() {
+    return systemLight.matches ? 'light' : 'dark';
+}
+document.getElementById('theme').addEventListener('click', function() {
+    var theme = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
+    document.documentElement.dataset.theme = theme;
+    try {
+        if (theme === systemTheme()) {
+            localStorage.removeItem('theme');
+        } else {
+            localStorage.setItem('theme', theme);
+        }
+    } catch (e) {}
+});
+systemLight.addEventListener('change', function() {
+    var saved = null;
+    try { saved = localStorage.getItem('theme'); } catch (e) {}
+    if (!saved) {
+        document.documentElement.dataset.theme = systemTheme();
+    }
+});
+
+updateGutter();
+if (document.fonts) {
+    document.fonts.ready.then(scheduleGutter);
+    document.fonts.addEventListener('loadingdone', scheduleGutter);
+}
+textarea.addEventListener('input', scheduleGutter);
+textarea.addEventListener('scroll', syncGutterScroll);
+window.addEventListener('resize', scheduleGutter);
+window.addEventListener('beforeprint', function() {
+    printable.textContent = textarea.value;
+});
+var copyAllButton = document.getElementById('copy-all');
+copyAllButton.onclick = function() {
+    copyBlock(textarea.value, copyAllButton);
+};
+
+function formatDate(seconds) {
+    return new Date(seconds * 1000).toLocaleString('en-GB', {weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'});
+}
+<?php if ($secret): ?>
+// Secret page: opening it (POST) deletes it from the server and returns its text and files.
+var SECRET_ID = '<?php print $secret['id']; ?>';
+var SECRET_KEY = window.location.hash.slice(1);
+var openButton = document.getElementById('open-secret');
+var secretInfo = document.getElementById('secret-info');
+
+function showGateError(message) {
+    var error = document.getElementById('gate-error');
+    error.textContent = message;
+    error.hidden = false;
+}
+
+// Files are decrypted by the server with the key sent in the body, then saved from a Blob.
+function downloadSecretFile(token, index, name) {
+    var request = new XMLHttpRequest();
+    request.open('POST', window.location.pathname + '?s=' + encodeURIComponent(token) + '&file=' + index, true);
+    request.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded; charset=UTF-8');
+    request.responseType = 'blob';
+    request.onload = function() {
+        if (request.status !== 200) {
+            alert('Could not download ' + name + ': the time to download the files is over.');
+            return;
+        }
+        var link = document.createElement('a');
+        link.href = URL.createObjectURL(new Blob([request.response], {type: 'application/octet-stream'}));
+        link.download = name;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(function() {
+            URL.revokeObjectURL(link.href);
+        }, 10000);
+    };
+    request.send('key=' + encodeURIComponent(SECRET_KEY));
+}
+
+if (openButton && !SECRET_KEY) {
+    showGateError('This link is not complete: check that it was copied whole, including the part after the "#".');
+    openButton.parentNode.style.display = 'none';
+}
+if (openButton) {
+    document.getElementById('gate-expires').textContent = 'Expires on ' + formatDate(<?php print $secret['expires']; ?>) + ' if not opened.';
+    openButton.onclick = function() {
+        openButton.disabled = true;
+        var request = new XMLHttpRequest();
+        request.open('POST', window.location.pathname + '?s=' + encodeURIComponent(SECRET_ID) + '&open', true);
+        request.onload = function() {
+            if (request.status !== 200) {
+                showGateError(request.responseText || 'Could not open the secret.');
+                openButton.parentNode.style.display = 'none';
+                return;
+            }
+            var data = JSON.parse(request.responseText);
+            textarea.value = data.text;
+            document.body.classList.add('opened');
+            document.body.classList.toggle('has-files', data.files.length > 0);
+            secretInfo.textContent = 'Secret opened and deleted from the server'
+                + (data.files.length ? ': download the files before '
+                + new Date(data.until * 1000).toLocaleTimeString('en-GB', {hour: '2-digit', minute: '2-digit'}) : '');
+            document.getElementById('files-count').textContent = data.files.length;
+            var list = document.getElementById('files-list');
+            data.files.forEach(function(file, index) {
+                var row = fileRow(file.name, formatSize(file.size), '#');
+                var download = document.createElement('button');
+                download.type = 'button';
+                download.className = 'file-action';
+                download.title = 'Download';
+                download.innerHTML = DOWNLOAD_ICON;
+                row.querySelector('.details').appendChild(download);
+                row.querySelector('.name').onclick = download.onclick = function(event) {
+                    event.preventDefault();
+                    downloadSecretFile(data.token, index, file.name);
+                };
+                list.appendChild(row);
+            });
+            updateGutter();
+        };
+        request.onerror = function() {
+            openButton.disabled = false;
+        };
+        request.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded; charset=UTF-8');
+        request.send('key=' + encodeURIComponent(SECRET_KEY));
+    };
+}
+<?php else: ?>
 var modifiedLabel = document.getElementById('modified-time');
 var statusDot = document.getElementById('status');
 var noteUrl = window.location.origin + window.location.pathname;
@@ -1682,34 +2167,6 @@ document.addEventListener('keydown', function(event) {
 });
 var mtime = <?php print $initial_mtime; ?>;
 
-// Theme toggle: a choice equal to the system preference is forgotten, so the page follows the system again
-var systemLight = matchMedia('(prefers-color-scheme: light)');
-function systemTheme() {
-    return systemLight.matches ? 'light' : 'dark';
-}
-document.getElementById('theme').addEventListener('click', function() {
-    var theme = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
-    document.documentElement.dataset.theme = theme;
-    try {
-        if (theme === systemTheme()) {
-            localStorage.removeItem('theme');
-        } else {
-            localStorage.setItem('theme', theme);
-        }
-    } catch (e) {}
-});
-systemLight.addEventListener('change', function() {
-    var saved = null;
-    try { saved = localStorage.getItem('theme'); } catch (e) {}
-    if (!saved) {
-        document.documentElement.dataset.theme = systemTheme();
-    }
-});
-
-var gutterInner = document.getElementById('gutter-inner');
-var glowInner = document.getElementById('glow-inner');
-var mirror = document.getElementById('mirror');
-var printable = document.getElementById('printable');
 var refreshButton = document.getElementById('refresh');
 var content = textarea.value;
 var version = '<?php print $initial_version; ?>';
@@ -1776,19 +2233,7 @@ document.addEventListener('drop', function(e) {
 });
 showModified();
 updateStatus();
-
-updateGutter();
-if (document.fonts) {
-    document.fonts.ready.then(scheduleGutter);
-    document.fonts.addEventListener('loadingdone', scheduleGutter);
-}
-textarea.addEventListener('input', scheduleGutter);
 textarea.addEventListener('input', updateStatus);
-textarea.addEventListener('scroll', syncGutterScroll);
-window.addEventListener('resize', scheduleGutter);
-window.addEventListener('beforeprint', function() {
-    printable.textContent = textarea.value;
-});
 
 // Only visible while in conflict.
 refreshButton.onclick = function() {
@@ -1826,11 +2271,6 @@ expires.onclick = function() {
     request.send();
 };
 
-var copyAllButton = document.getElementById('copy-all');
-copyAllButton.onclick = function() {
-    copyBlock(textarea.value, copyAllButton);
-};
-
 var clearButton = document.getElementById('clear');
 clearButton.onclick = function() {
     if (conflict) {
@@ -1843,6 +2283,108 @@ clearButton.onclick = function() {
     updateStatus();
     updateGutter();
 };
+// Make it a secret: once everything typed here is saved, the server moves the note to a one-time link.
+var secretDialog = document.getElementById('secret-dialog');
+var secretAsk = document.getElementById('secret-ask');
+var secretDone = document.getElementById('secret-done');
+var secretError = document.getElementById('secret-error');
+var secretChoices = secretAsk.querySelectorAll('[data-hours]');
+var secretCopy = document.getElementById('secret-copy');
+secretCopy.innerHTML = COPY_ICONS;
+
+function setSecretBusy(busy) {
+    Array.prototype.forEach.call(secretChoices, function(button) {
+        button.disabled = busy;
+    });
+}
+
+function showSecretError(message) {
+    secretError.textContent = message;
+    secretError.hidden = false;
+    setSecretBusy(false);
+}
+
+// Call back when the text is saved and no upload is pending; gives up after 10 seconds.
+function whenSaved(callback, tries) {
+    if (conflict || saveError) {
+        showSecretError(conflict ? 'This note changed on another device: click refresh first.' : 'Not saved: ' + saveError);
+    } else if (!saving && !uploads.length && content === textarea.value) {
+        callback();
+    } else if ((tries || 0) < 40) {
+        setTimeout(function() {
+            whenSaved(callback, (tries || 0) + 1);
+        }, 250);
+    } else {
+        showSecretError('The note is still saving, try again.');
+    }
+}
+
+function makeSecret(hours) {
+    var request = new XMLHttpRequest();
+    request.open('POST', window.location.pathname + '?secret=' + hours, true);
+    request.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded; charset=UTF-8');
+    request.onload = function() {
+        if (request.status !== 200) {
+            if (request.status === 409) {
+                setConflict(true);
+            }
+            showSecretError(request.responseText || 'Could not make the secret.');
+            return;
+        }
+        var data = JSON.parse(request.responseText);
+        var link = window.location.origin + window.location.pathname.replace(/[^\/]*$/, '') + '?s=' + data.id + '#' + data.key;
+        document.getElementById('secret-link').textContent = link;
+        document.getElementById('secret-expires').textContent = 'If nobody opens it, it expires on ' + formatDate(data.expires) + '.';
+        secretCopy.onclick = function() {
+            copyBlock(link, secretCopy);
+        };
+        secretAsk.hidden = true;
+        secretDone.hidden = false;
+
+        // The note no longer exists on the server: start over with an empty one.
+        textarea.value = content = version = filesVersion = '';
+        files = [];
+        filesChanged = 0;
+        setMtime(0);
+        renderFiles();
+        updateStatus();
+        updateGutter();
+    };
+    request.onerror = function() {
+        showSecretError('Network error, try again.');
+    };
+    request.send('base=' + encodeURIComponent(version));
+}
+
+document.getElementById('make-secret').onclick = function() {
+    if (!textarea.value.trim() && !files.length && !uploads.length) {
+        alert('Write something or attach a file first.');
+        return;
+    }
+    secretAsk.hidden = false;
+    secretDone.hidden = true;
+    secretError.hidden = true;
+    setSecretBusy(false);
+    secretDialog.showModal();
+};
+Array.prototype.forEach.call(secretChoices, function(button) {
+    button.onclick = function() {
+        setSecretBusy(true);
+        secretError.hidden = true;
+        whenSaved(function() {
+            makeSecret(button.dataset.hours);
+        });
+    };
+});
+Array.prototype.forEach.call(secretDialog.querySelectorAll('.secret-close'), function(button) {
+    button.onclick = function() {
+        secretDialog.close();
+    };
+});
+secretDialog.addEventListener('close', function() {
+    textarea.focus();
+});
+<?php endif; ?>
 </script>
 </body>
 </html>

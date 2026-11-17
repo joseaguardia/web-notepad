@@ -1,4 +1,5 @@
 # Deletes every note and attachment once a day (the app keeps no history; remove this file to keep notes).
+# Secrets (.secrets/) are kept: they expire on their own.
 # The volume is ReadWriteOnce, so the job must run on the same node as the app pod (podAffinity).
 apiVersion: batch/v1
 kind: CronJob
@@ -34,7 +35,7 @@ spec:
           containers:
             - name: cleanup
               image: busybox:1.37
-              command: ["find", "/var/lib/notas", "-mindepth", "1", "-delete"]
+              command: ["find", "/var/lib/notas", "-mindepth", "1", "!", "-path", "/var/lib/notas/.secrets", "!", "-path", "/var/lib/notas/.secrets/*", "-delete"]
               resources:
                 requests:
                   cpu: 10m
