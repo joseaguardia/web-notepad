@@ -7,165 +7,23 @@ Fork of [pereorga/minimalist-web-notepad](https://github.com/pereorga/minimalist
 
 ## What this fork adds
 
-- **File attachments**: drag files anywhere onto the page or use the **attach file** button (up to 5 MB each). The first file splits the screen and opens a **Files** panel on the right (below the editor on narrow screens) to download or delete each file, plus an **empty** button that deletes all of them and keeps the text.
-- **Live sync across devices**: text and file changes made on another device (or uploaded with `curl`) show up within a couple of seconds, keeping your cursor in place. Polling pauses while the tab is hidden.
-- **Safe saving across devices**: if you edit on two devices at the same time, the note is not overwritten; autosave pauses and an amber refresh button appears so you can load the server version.
-- **Save status indicator**: a dot next to the time shows whether the note is saved (green), pending (amber) or in conflict (red).
-- **Action buttons** on the right side of the editor (labels appear on hover):
-  - **attach file**: picks files to upload (also works on mobile, where there is no drag and drop).
-  - **copy all**: copies the whole note to the clipboard.
-  - **clear**: empties the note (and deletes it on the server) without asking.
-  - **make it a secret**: turns the note (text and files) into a one-time link, see below.
-- **Secrets (one-time links)**: the **make it a secret** button moves the note, text and files, to a link like `https://example.com/notes/?s=<random id>#<key>` that expires in 1 hour, 1 day or 1 week if nobody opens it, and the note is deleted. The link shows an **open secret** button first, so link previews in chat apps do not use it up; opening it deletes the secret from the server and shows the text (read-only, with the copy buttons) and the files, which can be downloaded for 10 more minutes. Secrets are not affected by the idle deletion (`NOTE_TTL_MINUTES`) nor by a daily wipe that skips `.secrets/` (see below). Up to `MAX_SECRETS` at the same time.
-- **Copy by block**: every block of text separated by a blank line gets an icon on the left that copies it to the clipboard; hovering it highlights the block.
-- **Footer** with a **commands help** button that shows, on hover or click, the commands to upload text, upload a file and download a file for the current note, each with a copy button; plus a link to this repository with the app version, the last saved time and a trash icon with a bar that empties as the note approaches its deletion for not being changed (both turn pink in the last 10 minutes; the minutes left are in its tooltip).
-- **Per-file buttons** in the Files panel: download the file, or copy its `curl` download command.
-- **Light and dark themes** based on the brand palette: follows the browser preference, with a sun/moon button in the footer to switch it (remembered per browser). Also a larger font.
-- **Docker image and Kubernetes manifests**: non-root, read-only container, configured with environment variables.
+- **Attachments**: drop files on the page or use the attach button to share them along with the note.
+- **Live sync**: changes made on another device show up within a couple of seconds.
+- **Safe saving**: editing on two devices at once never overwrites the note; you choose when to reload.
+- **Save status**: a dot shows whether the note is saved, pending or in conflict.
+- **Copy by block**: each paragraph has its own copy button; there is also a copy all button.
+- **Secrets**: turn a note into an encrypted one-time link, with a QR code, that is deleted once opened.
+- **Auto-delete**: notes not changed for a while are deleted; the footer shows the time left.
+- **Command line**: read, write and attach files with `curl`; the footer shows the commands.
+- **Light and dark themes**: follows the system, with a button to switch.
+- **Docker and Kubernetes**: a hardened container image and ready-to-use manifests.
 
-## Installation
+## Secrets
 
-### Docker
-
-The image (`Dockerfile`) is based on the official `php:8.5.12-apache` image, pinned to a release that fixes the php2shell vulnerabilities (CVE-2026-109618, CVE-2026-109619). Apache runs as `www-data` on port 8080 and the container works with a read-only root filesystem. Notes and attachments are stored in the `/var/lib/notas` volume.
-
-1. Clone the repository and enter it: `git clone https://github.com/joseaguardia/web-notepad.git && cd web-notepad`.
-2. Build and start it with Compose (read-only container, `notes` volume, port 8080; set `PORT` to change it):
-
-   ```
-   docker compose up --detach --build
-   ```
-
-   Or without Compose:
-
-   ```
-   docker build --pull --tag web-notepad . && docker run --detach --name web-notepad --publish 8080:8080 --volume notes:/var/lib/notas --restart unless-stopped web-notepad
-   ```
-
-3. Open `http://localhost:8080/`, which redirects to a new note with a random name.
-
-With Podman, replace `docker` with `podman` in the commands above.
-
-Settings are environment variables (in `docker-compose.yml`, or `--env` with `docker run`):
-
-| Variable | Default | Description |
-|---|---|---|
-| `MAX_FILE_SIZE_MB` | `5` | Maximum size of each attachment |
-| `MAX_TOTAL_SIZE_MB` | `100` | Maximum size of all attachments of all notes together |
-| `MAX_NOTE_SIZE_MB` | `2` | Maximum size of the text of each note |
-| `MAX_NOTES` | `25` | Maximum number of notes at the same time (with text or attachments); new ones are refused with 507 |
-| `NOTE_TTL_MINUTES` | `45` | Notes not changed (text saved, attachment added or deleted) for this many minutes are deleted; `0` disables it |
-| `MAX_SECRETS` | `25` | Maximum number of unopened secrets at the same time; new ones are refused with 507 |
-| `PHP_POST_MAX_SIZE` | `8M` | PHP request body limit: keep it a bit larger than `MAX_FILE_SIZE_MB` |
-| `NOTES_PATH` | `/var/lib/notas` | Directory for notes and attachments |
-
-Useful commands:
-
-- Logs: `docker logs --follow web-notepad`
-- Update after pulling changes: `docker compose up --detach --build`
-- Stop (notes are kept in the volume): `docker compose down`; add `--volumes` to delete the notes too.
-
-Notes not changed for 45 minutes are deleted automatically (`NOTE_TTL_MINUTES`; the check runs on incoming requests, at most once a minute). To also empty everything at a fixed time, add a cron job on the host, e.g. `0 19 * * * docker exec web-notepad find /var/lib/notas -mindepth 1 ! -path '/var/lib/notas/.secrets' ! -path '/var/lib/notas/.secrets/*' -delete` (it keeps the secrets, which expire on their own).
-
-Behind a reverse proxy, allow request bodies a bit larger than `MAX_FILE_SIZE_MB` (e.g. `client_max_body_size 8m;` in Nginx).
-
-### Kubernetes
-
-The manifests in `deploy/k8s/` use kustomize (built into `kubectl`) and target ingress-nginx:
-
-| File | Resource |
-|---|---|
-| `namespace.yaml` | `web-notepad` namespace |
-| `pvc.yaml` | 1 GiB `ReadWriteOnce` volume for notes and attachments |
-| `deployment.yaml` | Single replica, non-root, read-only root filesystem, probes and resource limits |
-| `service.yaml` | ClusterIP service on port 80 |
-| `ingress.yaml` | Ingress with `proxy-body-size: 8m` (ingress-nginx allows only 1 MB by default) |
-| `cronjob.yaml` | Empties the volume every day at 19:00 Europe/Madrid (remove it from `kustomization.yaml` to keep notes) |
-
-1. Build the image and push it to your registry:
-
-   ```
-   docker build --pull --tag registry.example.com/web-notepad:1.6 . && docker push registry.example.com/web-notepad:1.6
-   ```
-
-2. Set the image in `kustomization.yaml` (`images`), the host in `ingress.yaml` (plus TLS if needed) and, optionally, the storage size in `pvc.yaml` and the limits in the `env` of `deployment.yaml`.
-3. Apply and check:
-
-   ```
-   kubectl apply --kustomize deploy/k8s && kubectl --namespace web-notepad rollout status deployment/web-notepad
-   ```
-
-Keep a single replica: saves are serialized with a file lock in the volume, which is `ReadWriteOnce`. The cleanup CronJob runs on the same node as the app pod for the same reason.
-
-### Manual
-
-1. Copy `index.php`, `.htaccess` and `favicon.ico` to your server (PHP 7+).
-2. Make the notes directory writable by the web server. It is `/var/lib/notas` by default; change it with `$save_path` at the top of `index.php` (preferably outside the document root). Attachments are stored there too, in a `<note>.files/` directory per note.
-3. Set up URL rewriting so that `/<note>` reaches `index.php?note=<note>`, keeping the query string:
-
-**Apache**: with `mod_rewrite` enabled and `AllowOverride` allowed, the included `.htaccess` is enough.
-
-**Nginx** (project under `/notes/`):
-
-```
-location ~* ^/notes/([a-zA-Z0-9_-]+)$ {
-    try_files $uri /notes/index.php?note=$1&$args;
-}
-
-# PUT /notes/<note>/<file> uploads an attachment (curl --upload-file <file> https://example.com/notes/<note>/),
-# GET downloads it (curl --remote-name https://example.com/notes/<note>/<file>)
-location ~* ^/notes/(?<note>[a-zA-Z0-9_-]+)/(?<file>[^/]+)$ {
-    if ($request_method ~ ^(PUT|POST)$) {
-        rewrite ^ /notes/index.php?note=$note&upload=$file last;
-    }
-    try_files $uri /notes/index.php?note=$note&file=$file&$args;
-}
-```
-
-### Attachment settings
-
-The limits are at the top of `index.php`: `$max_file_size` (5 MB per file), `$max_total_size` (100 MB for all the attachments of all notes together) and `$max_note_size` (2 MB for the text of each note).
-
-Files are sent as the raw request body, so PHP's `file_uploads` can stay disabled. The web server and PHP must still accept request bodies a bit larger than `$max_file_size`:
-
-- PHP: `post_max_size` (8 MB by default, enough for 5 MB files).
-- Nginx: `client_max_body_size` (1 MB by default, so it must be raised).
-
-### Security notes
-
-- Attachments are only served through `index.php`, always as a download (`Content-Disposition: attachment`) with `X-Content-Type-Options: nosniff` and a sandboxing `Content-Security-Policy`, so an uploaded HTML or SVG file can never run scripts on your domain.
-- File names are reduced to `[a-zA-Z0-9._-]`, so paths like `../../etc/passwd` end up as a plain file name inside the note's directory.
-- There is no authentication: anyone who knows a note's URL can read it and upload files to it. Keep `$max_total_size`, `$max_note_size` and `$max_notes` low and consider deleting notes periodically, e.g. with a daily cron job: `find /var/lib/notas -mindepth 1 ! -path '/var/lib/notas/.secrets' ! -path '/var/lib/notas/.secrets/*' -delete` (it keeps the secrets in `.secrets/`).
-- Secrets are stored encrypted (AES-256-GCM, text, file names and contents) with a random key that the server does not keep: it only travels in the link after the `#` (never sent in requests, so it is not in any log) and the page sends it in the POST body to open the secret or download its files. The server sees the content in plain text while it is a note and while it encrypts or decrypts it. Anyone who gets the full link first can open it.
-
-## Command-line usage
-
-```
-# Read a note (curl and wget get plain text)
-curl https://example.com/notes/test
-
-# Save the output of a command to a note
-ls -la | curl --data-binary @- https://example.com/notes/test
-
-# Save a file's contents as the note text
-curl --data-binary @/etc/hosts https://example.com/notes/hosts
-
-# Attach a file to a note (with a trailing slash curl appends the local file name)
-curl --upload-file report.pdf https://example.com/notes/test/
-
-# Attach a file under a different name
-curl --upload-file report.pdf 'https://example.com/notes/test?upload=2026-report.pdf'
-
-# Download an attachment (saved as report.pdf in the current directory)
-curl --remote-name https://example.com/notes/test/report.pdf
-
-# List the attachments of a note (JSON)
-curl 'https://example.com/notes/test?files'
-```
-
-Use `--data-binary` rather than `--data`, which strips newlines. Saving text from the command line always overwrites the note, and sending an empty body deletes it. Uploading a file with the same name as an existing attachment replaces it.
-
-When reading with `?raw`, curl or wget, the response includes the `X-Note-Version` (content hash) and `X-Note-Mtime` (last modified, Unix timestamp) headers.
+<p>
+<img src="screenshot-secret-create.png" alt="The secret link with its QR code" width="49%">
+<img src="screenshot-secret-open.png" alt="The page that opens a secret" width="49%">
+</p>
 
 ## License
 
