@@ -7,7 +7,7 @@
 $save_path = rtrim(getenv('NOTES_PATH') ?: '/var/lib/notas', '/');
 
 // Shown in the footer next to the GitHub link. Bump it on each release.
-$app_version = '1.7.1';
+$app_version = '1.7.2';
 $repo_url = 'https://github.com/joseaguardia/web-notepad';
 
 // Attachment limits: size of each file, and total size of all attachments of all notes.
@@ -387,6 +387,7 @@ body {
     --bg-to: #002f3d;
     --surface: 0, 25, 35;
     --text: 227, 226, 218;
+    --footer-text: 227, 226, 218;
     --primary: 79, 209, 232;
     --neutral: 229, 231, 235;
     --teal: 45, 212, 191;
@@ -402,20 +403,21 @@ body {
 }
 :root[data-theme="light"] {
     color-scheme: light;
-    /* Brand palette: Gris Cerámica background, white surfaces, Azul Oscuro text,
+    /* Brand palette: Azul Oscuro page background, white surfaces, Azul Oscuro text,
        Azul Claro highlights and Azul Amazónico for the attachments accent */
-    --bg: #e3e2da;
-    --bg-from: #e9e8e1;
-    --bg-to: #d9d8cf;
+    --bg: #004254;
+    --bg-from: #004254;
+    --bg-to: #004254;
     --surface: 255, 255, 255;
     --text: 0, 25, 35;
+    --footer-text: 227, 226, 218;
     --primary: 0, 176, 189;
     --neutral: 0, 25, 35;
     --teal: 0, 66, 84;
     --ok: 5, 150, 105;
     --warn: 217, 119, 6;
     --danger: 220, 38, 38;
-    --expires-text: 0, 66, 84;
+    --expires-text: 214, 246, 252;
     --selection: #b3e7eb;
     --selection-text: rgb(0, 25, 35);
     --code-bg: rgba(0, 66, 84, 0.08);
@@ -447,7 +449,7 @@ body {
     justify-content: flex-end;
     gap: 8px;
     font: 16px/24px var(--mono);
-    color: rgb(var(--text));
+    color: rgb(var(--footer-text));
 }
 /* Dimmed per child rather than on #modified, so the commands popover stays opaque */
 #modified > :not(#cli):not(#saved),
@@ -627,6 +629,7 @@ body {
     padding: 12px 10px 12px 14px;
     font-size: 14px;
     line-height: 20px;
+    color: rgb(var(--text));
     background: rgb(var(--surface));
     border: 1px solid rgba(var(--text), 0.12);
     border-radius: 10px;
