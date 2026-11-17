@@ -1166,9 +1166,24 @@ body {
     background: var(--code-bg);
     border-radius: 6px;
 }
-.link .file-action {
-    width: 32px;
-    height: 32px;
+/* The secret ready screen is centred */
+#secret-done {
+    text-align: center;
+}
+#secret-done h2,
+#secret-done .choices.end {
+    justify-content: center;
+}
+#secret-copy-row {
+    margin-top: 12px;
+}
+/* The copy link button says "copied" for a moment after copying */
+#secret-copy .copied-label,
+#secret-copy.copied .copy-label {
+    display: none;
+}
+#secret-copy.copied .copied-label {
+    display: inline;
 }
 #secret-dialog {
     margin: auto;
@@ -1586,7 +1601,7 @@ if ($initial_text !== false) {
 <?php if ($secret): ?>
 <div id="gate"><div class="card">
 <?php if ($secret['id']): ?>
-<div class="gate-badge"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/><path d="M12 15v2"/></svg></div>
+<div class="gate-badge"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".5" fill="currentColor"/></svg></div>
 <h2>Someone shared a secret with you</h2>
 <div class="once"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg><div><strong>It can be opened only once</strong>Opening it deletes it from the server, so copy or download what you need right away.</div></div>
 <p class="gate-meta"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg><span id="gate-expires"></span></p>
@@ -1613,7 +1628,8 @@ if ($initial_text !== false) {
 <div id="secret-done" hidden>
 <h2><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>Secret ready</h2>
 <p>Share this link. It can be opened only once.</p>
-<div class="link"><code id="secret-link"></code><button id="secret-copy" class="file-action" type="button" title="Copy link"></button></div>
+<div class="link"><code id="secret-link"></code></div>
+<div id="secret-copy-row" class="choices"><button id="secret-copy" class="card-button solid" type="button"></button></div>
 <p id="secret-expires" class="muted"></p>
 <div id="secret-qr-row" class="choices"><button id="secret-qr-button" class="card-button" type="button"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="5" height="5" x="3" y="3" rx="1"/><rect width="5" height="5" x="16" y="3" rx="1"/><rect width="5" height="5" x="3" y="16" rx="1"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/><path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/><path d="M3 12h.01"/><path d="M12 3h.01"/><path d="M12 16v.01"/><path d="M16 12h1"/><path d="M21 12v.01"/><path d="M12 21v-1"/></svg>generate QR</button></div>
 <div id="secret-qr" hidden></div>
@@ -2620,7 +2636,7 @@ var secretDone = document.getElementById('secret-done');
 var secretError = document.getElementById('secret-error');
 var secretChoices = secretAsk.querySelectorAll('[data-hours]');
 var secretCopy = document.getElementById('secret-copy');
-secretCopy.innerHTML = COPY_ICONS;
+secretCopy.innerHTML = COPY_ICONS + '<span class="copy-label">copy link</span><span class="copied-label">copied</span>';
 
 function setSecretBusy(busy) {
     Array.prototype.forEach.call(secretChoices, function(button) {
