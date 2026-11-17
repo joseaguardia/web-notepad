@@ -7,7 +7,7 @@
 $save_path = rtrim(getenv('NOTES_PATH') ?: '/var/lib/notas', '/');
 
 // Shown in the footer next to the GitHub link. Bump it on each release.
-$app_version = '2.1';
+$app_version = '2.2';
 $repo_url = 'https://github.com/joseaguardia/web-notepad';
 
 // Attachment limits: size of each file, and total size of all attachments of all notes.
@@ -577,6 +577,8 @@ body {
     --backdrop: rgba(0, 0, 0, 0.55);
     --shadow-strong: rgba(0, 0, 0, 0.5);
     --on-primary: 0, 25, 35;
+    --qr-dark: 0, 25, 35;
+    --qr-light: 255, 255, 255;
     --secret-shade-from: rgba(0, 25, 35, 0);
     --secret-shade-to: rgba(0, 25, 35, 0.55);
 }
@@ -605,6 +607,8 @@ body {
     --backdrop: rgba(0, 25, 35, 0.45);
     --shadow-strong: rgba(0, 25, 35, 0.4);
     --on-primary: 0, 25, 35;
+    --qr-dark: 0, 25, 35;
+    --qr-light: 255, 255, 255;
     --secret-shade-from: rgba(0, 25, 35, 0);
     --secret-shade-to: rgba(0, 25, 35, 0.55);
 }
@@ -1172,6 +1176,27 @@ body {
 #secret-expires {
     margin: 12px 0 0;
 }
+#secret-qr-row {
+    margin-top: 16px;
+}
+#secret-qr-button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+/* QR codes need dark modules on a light background in both themes */
+#secret-qr svg {
+    display: block;
+    width: 200px;
+    height: 200px;
+    margin: 16px auto 0;
+    background: rgb(var(--qr-light));
+    border-radius: 8px;
+}
+#secret-qr path {
+    fill: rgb(var(--qr-dark));
+}
 #secret-dialog::backdrop {
     background: var(--backdrop);
 }
@@ -1590,6 +1615,8 @@ if ($initial_text !== false) {
 <p>Share this link. It can be opened only once.</p>
 <div class="link"><code id="secret-link"></code><button id="secret-copy" class="file-action" type="button" title="Copy link"></button></div>
 <p id="secret-expires" class="muted"></p>
+<div id="secret-qr-row" class="choices"><button id="secret-qr-button" class="card-button" type="button"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="5" height="5" x="3" y="3" rx="1"/><rect width="5" height="5" x="16" y="3" rx="1"/><rect width="5" height="5" x="3" y="16" rx="1"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/><path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/><path d="M3 12h.01"/><path d="M12 3h.01"/><path d="M12 16v.01"/><path d="M16 12h1"/><path d="M21 12v.01"/><path d="M12 21v-1"/></svg>generate QR</button></div>
+<div id="secret-qr" hidden></div>
 <div class="choices end"><button class="card-button secondary secret-close" type="button">close</button></div>
 </div>
 </dialog>
@@ -2390,7 +2417,203 @@ clearButton.onclick = function() {
     updateStatus();
     updateGutter();
 };
+// Minimal QR encoder for the secret link: byte mode, error correction level M, versions 1-9 (up to 180 bytes)
+// and a fixed mask 0 (no penalty scoring, scanners read any mask). Returns rows of booleans (true = dark),
+// or null if the text does not fit.
+function qrMatrix(text) {
+    // Per version: total codewords, error correction codewords per block, blocks, alignment pattern centres
+    var TOTAL = [0, 26, 44, 70, 100, 134, 172, 196, 242, 292];
+    var EC = [0, 10, 16, 26, 18, 24, 16, 18, 22, 22];
+    var BLOCKS = [0, 1, 1, 1, 2, 2, 4, 4, 4, 5];
+    var ALIGN = [0, [], [6, 18], [6, 22], [6, 26], [6, 30], [6, 34], [6, 22, 38], [6, 24, 42], [6, 26, 46]];
+    var bytes = Array.from(new TextEncoder().encode(text));
+    var version = 1;
+    while (version <= 9 && bytes.length + 2 > TOTAL[version] - EC[version] * BLOCKS[version]) {
+        version++;
+    }
+    if (version > 9) {
+        return null;
+    }
+    var i, j, total = TOTAL[version], ecLen = EC[version], numBlocks = BLOCKS[version];
+    var dataLen = total - ecLen * numBlocks;
+
+    // Data codewords: mode, length, bytes, terminator, then the standard padding
+    var bits = [];
+    function push(value, length) {
+        for (var n = length - 1; n >= 0; n--) {
+            bits.push((value >>> n) & 1);
+        }
+    }
+    push(4, 4);
+    push(bytes.length, 8);
+    bytes.forEach(function(b) { push(b, 8); });
+    push(0, Math.min(4, dataLen * 8 - bits.length));
+    push(0, (8 - bits.length % 8) % 8);
+    var data = [];
+    for (i = 0; i < bits.length; i += 8) {
+        data.push(parseInt(bits.slice(i, i + 8).join(''), 2));
+    }
+    for (var pad = 0xEC; data.length < dataLen; pad ^= 0xEC ^ 0x11) {
+        data.push(pad);
+    }
+
+    // Reed-Solomon error correction per block over GF(256), then interleave the blocks
+    function mul(x, y) {
+        var z = 0;
+        for (var n = 7; n >= 0; n--) {
+            z = (z << 1) ^ ((z >>> 7) * 0x11D);
+            z ^= ((y >>> n) & 1) * x;
+        }
+        return z;
+    }
+    var divisor = [], root = 1;
+    for (i = 0; i < ecLen - 1; i++) {
+        divisor.push(0);
+    }
+    divisor.push(1);
+    for (i = 0; i < ecLen; i++) {
+        for (j = 0; j < ecLen; j++) {
+            divisor[j] = mul(divisor[j], root);
+            if (j + 1 < ecLen) {
+                divisor[j] ^= divisor[j + 1];
+            }
+        }
+        root = mul(root, 2);
+    }
+    var numShort = numBlocks - total % numBlocks, shortLen = Math.floor(total / numBlocks);
+    var blocks = [], start = 0;
+    for (i = 0; i < numBlocks; i++) {
+        var end = start + shortLen - ecLen + (i < numShort ? 0 : 1);
+        var block = data.slice(start, end);
+        start = end;
+        var rem = divisor.map(function() { return 0; });
+        block.forEach(function(b) {
+            var factor = b ^ rem.shift();
+            rem.push(0);
+            divisor.forEach(function(c, n) { rem[n] ^= mul(c, factor); });
+        });
+        if (i < numShort) {
+            block.push(0);
+        }
+        blocks.push(block.concat(rem));
+    }
+    var codewords = [];
+    for (i = 0; i < blocks[0].length; i++) {
+        for (j = 0; j < numBlocks; j++) {
+            if (i !== shortLen - ecLen || j >= numShort) {
+                codewords.push(blocks[j][i]);
+            }
+        }
+    }
+
+    // Function patterns: timing, finders, alignment, format and version information
+    var size = version * 4 + 17, modules = [], fixed = [];
+    for (i = 0; i < size; i++) {
+        modules.push(new Array(size).fill(false));
+        fixed.push(new Array(size).fill(false));
+    }
+    function set(x, y, dark) {
+        modules[y][x] = dark;
+        fixed[y][x] = true;
+    }
+    for (i = 0; i < size; i++) {
+        set(6, i, i % 2 === 0);
+        set(i, 6, i % 2 === 0);
+    }
+    [[3, 3], [size - 4, 3], [3, size - 4]].forEach(function(c) {
+        for (var dy = -4; dy <= 4; dy++) {
+            for (var dx = -4; dx <= 4; dx++) {
+                var d = Math.max(Math.abs(dx), Math.abs(dy)), x = c[0] + dx, y = c[1] + dy;
+                if (x >= 0 && x < size && y >= 0 && y < size) {
+                    set(x, y, d !== 2 && d !== 4);
+                }
+            }
+        }
+    });
+    var align = ALIGN[version], last = align.length - 1;
+    align.forEach(function(ax, a) {
+        align.forEach(function(ay, b) {
+            if ((a === 0 && b === 0) || (a === 0 && b === last) || (a === last && b === 0)) {
+                return;
+            }
+            for (var dy = -2; dy <= 2; dy++) {
+                for (var dx = -2; dx <= 2; dx++) {
+                    set(ax + dx, ay + dy, Math.max(Math.abs(dx), Math.abs(dy)) !== 1);
+                }
+            }
+        });
+    });
+    // Level M (00) with mask 0 has all-zero format data, so its BCH bits are zero too and only the XOR mask remains
+    var format = 0x5412;
+    function formatBit(n) {
+        return ((format >>> n) & 1) === 1;
+    }
+    for (i = 0; i <= 5; i++) {
+        set(8, i, formatBit(i));
+    }
+    set(8, 7, formatBit(6));
+    set(8, 8, formatBit(7));
+    set(7, 8, formatBit(8));
+    for (i = 9; i < 15; i++) {
+        set(14 - i, 8, formatBit(i));
+    }
+    for (i = 0; i < 8; i++) {
+        set(size - 1 - i, 8, formatBit(i));
+    }
+    for (i = 8; i < 15; i++) {
+        set(8, size - 15 + i, formatBit(i));
+    }
+    set(8, size - 8, true);
+    if (version >= 7) {
+        var r = version;
+        for (i = 0; i < 12; i++) {
+            r = (r << 1) ^ ((r >>> 11) * 0x1F25);
+        }
+        var info = (version << 12) | r;
+        for (i = 0; i < 18; i++) {
+            var dark = ((info >>> i) & 1) === 1, a = size - 11 + i % 3, b = Math.floor(i / 3);
+            set(a, b, dark);
+            set(b, a, dark);
+        }
+    }
+
+    // Codewords in the zigzag column pairs, masked with (x + y) % 2 === 0
+    var n = 0;
+    for (var right = size - 1; right >= 1; right -= 2) {
+        if (right === 6) {
+            right = 5;
+        }
+        for (var vert = 0; vert < size; vert++) {
+            for (j = 0; j < 2; j++) {
+                var x = right - j, y = ((right + 1) & 2) === 0 ? size - 1 - vert : vert;
+                if (fixed[y][x]) {
+                    continue;
+                }
+                var bit = n < codewords.length * 8 && ((codewords[n >>> 3] >>> (7 - (n & 7))) & 1) === 1;
+                n++;
+                modules[y][x] = bit !== ((x + y) % 2 === 0);
+            }
+        }
+    }
+    return modules;
+}
+
+// SVG of a QR matrix with the 4-module quiet zone
+function qrSvg(modules) {
+    var size = modules.length + 8, path = '';
+    modules.forEach(function(row, y) {
+        row.forEach(function(dark, x) {
+            if (dark) {
+                path += 'M' + (x + 4) + ' ' + (y + 4) + 'h1v1h-1z';
+            }
+        });
+    });
+    return '<svg viewBox="0 0 ' + size + ' ' + size + '" shape-rendering="crispEdges"><path d="' + path + '"/></svg>';
+}
+
 // Make it a secret: once everything typed here is saved, the server moves the note to a one-time link.
+var secretQr = document.getElementById('secret-qr');
+var secretQrRow = document.getElementById('secret-qr-row');
 var secretDialog = document.getElementById('secret-dialog');
 var secretAsk = document.getElementById('secret-ask');
 var secretDone = document.getElementById('secret-done');
@@ -2444,6 +2667,15 @@ function makeSecret(hours) {
         document.getElementById('secret-expires').textContent = 'If nobody opens it, it expires on ' + formatDate(data.expires) + '.';
         secretCopy.onclick = function() {
             copyBlock(link, secretCopy);
+        };
+        var qrMatrixForLink = qrMatrix(link);
+        secretQr.hidden = true;
+        secretQr.innerHTML = '';
+        secretQrRow.style.display = qrMatrixForLink ? '' : 'none';
+        document.getElementById('secret-qr-button').onclick = function() {
+            secretQr.innerHTML = qrSvg(qrMatrixForLink);
+            secretQr.hidden = false;
+            secretQrRow.style.display = 'none';
         };
         secretAsk.hidden = true;
         secretDone.hidden = false;
