@@ -7,7 +7,7 @@
 $save_path = rtrim(getenv('NOTES_PATH') ?: '/var/lib/notas', '/');
 
 // Shown in the footer next to the GitHub link. Bump it on each release.
-$app_version = '2.2';
+$app_version = '2.3.1';
 $repo_url = 'https://github.com/joseaguardia/web-notepad';
 
 // Attachment limits: size of each file, and total size of all attachments of all notes.
@@ -1009,6 +1009,33 @@ body {
     color: rgb(var(--ok));
     opacity: 1;
 }
+/* Secret view: instead of the block copy buttons, an icon per detected credential line
+   (one line tall, so consecutive lines don't overlap) that copies only its value */
+.copy-btn.sensitive {
+    --accent: var(--primary);
+    height: 24px;
+    margin-top: 1px;
+    color: rgb(var(--accent));
+    opacity: 0.85;
+}
+.copy-btn.sensitive:hover {
+    background: rgba(var(--accent), 0.15);
+}
+.copy-btn.sensitive.copied {
+    color: rgb(var(--ok));
+}
+/* User and host stay in --primary; actual secrets (password, token, SSH key) in --danger */
+.sensitive.password,
+.sensitive.token,
+.sensitive.ssh {
+    --accent: var(--danger);
+}
+.copy-btn.sensitive + .block-bar {
+    background: rgb(var(--accent));
+}
+.copy-btn.sensitive:hover + .block-bar {
+    opacity: 0.8;
+}
 .action {
     position: absolute;
     right: 30px;
@@ -1849,14 +1876,73 @@ function copyBlock(text, button) {
 var COPY_ICONS = '<svg class="icon-copy" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>'
     + '<svg class="icon-check" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
 
+// Credential lines in a secret: "<label>: value" (or "=") lines whose label, up to 30 chars,
+// contains one of these words (the first matching type wins, so "Mail password" is a password and "SSH clave" an SSH key),
+// SSH keys and well-known token formats. Each one is { start, end, type, value } (offsets of its lines).
+var SENSITIVE_LABELS = [
+    ['ssh', /(?:^|[^\p{L}\d])(?:ssh|private[ _-]?key|clave privada)(?![\p{L}\d])/iu],
+    ['password', /(?:^|[^\p{L}\d])(?:pass(?:word|wd)?|pwd|contraseña|clave)(?![\p{L}\d])/iu],
+    ['token', /(?:^|[^\p{L}\d])(?:token|api[ _-]?key|secret)(?![\p{L}\d])/iu],
+    ['user', /(?:^|[^\p{L}\d])(?:user(?:name)?|usuario|login|e-?mail|mail|correo)(?![\p{L}\d])/iu],
+    ['host', /(?:^|[^\p{L}\d])(?:host(?:name)?|server|servidor|ip|url|uri|endpoint|domain|dominio)(?![\p{L}\d])/iu],
+    // "API" alone last, so "API URL" stays a host
+    ['token', /(?:^|[^\p{L}\d])api(?![\p{L}\d])/iu]
+];
+var TOKEN_PATTERN = /(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_\w{20,}|glpat-[\w-]{20,}|AKIA[0-9A-Z]{16}|xox[abprs]-[\w-]{10,}|sk-[\w-]{20,}|eyJ[\w-]{10,}\.[\w-]{10,}\.[\w-]+)/;
+var SENSITIVE_TITLES = {host: 'Copy the host', user: 'Copy the user', password: 'Copy the password', token: 'Copy the token', ssh: 'Copy the SSH key'};
+var SENSITIVE_ICONS = {
+    host: '<rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><line x1="7" y1="7.5" x2="7.01" y2="7.5"/><line x1="7" y1="16.5" x2="7.01" y2="16.5"/>',
+    user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+    password: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+    token: '<path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6z"/>',
+    ssh: '<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>'
+};
+
+function findSensitive(text) {
+    var lines = text.split('\n');
+    var items = [];
+    var pos = 0;
+    var keyStart = -1;
+    for (var i = 0; i < lines.length; i++) {
+        var line = lines[i];
+        var end = pos + line.length;
+        var match;
+        if (keyStart >= 0) {
+            if (/^-----END [A-Z ]*PRIVATE KEY-----/.test(line.trim())) {
+                items.push({start: keyStart, end: end, type: 'ssh', value: text.slice(keyStart, end) + '\n'});
+                keyStart = -1;
+            }
+        } else if (/^-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(line.trim())) {
+            keyStart = pos;
+        } else if (/^\s*(?:ssh-(?:rsa|ed25519|dss)|ecdsa-sha2-\S+) [A-Za-z0-9+\/=]{20,}/.test(line)) {
+            items.push({start: pos, end: end, type: 'ssh', value: line.trim()});
+        } else {
+            var label = /^\s*(?:[-*•]\s*)?([^:=\n]{1,30}?)\s*[:=]\s*(\S.*)$/.exec(line);
+            var found = label && SENSITIVE_LABELS.some(function(type) {
+                if (type[1].test(label[1])) {
+                    var value = label[2].trim().replace(/^(["'`])(.*)\1$/, '$2');
+                    items.push({start: pos, end: end, type: type[0], value: value});
+                    return true;
+                }
+            });
+            if (!found && (match = TOKEN_PATTERN.exec(line))) {
+                items.push({start: pos, end: end, type: 'token', value: match[0]});
+            }
+        }
+        pos = end + 1;
+    }
+    return items;
+}
+
 function syncGutterScroll() {
     gutterInner.style.transform = glowInner.style.transform = 'translateY(' + (-textarea.scrollTop) + 'px)';
 }
 
 // Rebuild the copy buttons, placing each one at the first line of its block.
+// In the secret view the buttons go on the detected credential lines instead, and copy only the value.
 function updateGutter() {
     var text = textarea.value;
-    var blocks = findBlocks(text);
+    var blocks = SECRET_VIEW ? findSensitive(text) : findBlocks(text);
 
     // The mirror wraps text exactly like the textarea, so markers give line positions.
     mirror.style.width = textarea.clientWidth + 'px';
@@ -1884,9 +1970,16 @@ function updateGutter() {
     blocks.forEach(function(block, i) {
         var button = document.createElement('button');
         button.type = 'button';
-        button.className = 'copy-btn';
-        button.title = 'Copy this block';
-        button.innerHTML = COPY_ICONS;
+        if (SECRET_VIEW) {
+            button.className = 'copy-btn sensitive ' + block.type;
+            button.title = SENSITIVE_TITLES[block.type];
+            button.innerHTML = '<svg class="icon-copy" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+                + SENSITIVE_ICONS[block.type] + '</svg>' + COPY_ICONS.slice(COPY_ICONS.indexOf('<svg class="icon-check"'));
+        } else {
+            button.className = 'copy-btn';
+            button.title = 'Copy this block';
+            button.innerHTML = COPY_ICONS;
+        }
         button.style.top = markers[i].offsetTop + 'px';
 
         // Keep the focus (and cursor) in the editor.
@@ -1894,7 +1987,7 @@ function updateGutter() {
             e.preventDefault();
         };
         button.onclick = function() {
-            copyBlock(text.slice(block.start, block.end), button);
+            copyBlock(SECRET_VIEW ? block.value : text.slice(block.start, block.end), button);
         };
         gutterInner.appendChild(button);
 
@@ -2136,6 +2229,7 @@ var textarea = document.getElementById('content');
 var gutterInner = document.getElementById('gutter-inner');
 var glowInner = document.getElementById('glow-inner');
 var mirror = document.getElementById('mirror');
+var SECRET_VIEW = document.body.classList.contains('secret-view');
 var printable = document.getElementById('printable');
 // Theme toggle: a choice equal to the system preference is forgotten, so the page follows the system again
 var systemLight = matchMedia('(prefers-color-scheme: light)');
