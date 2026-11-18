@@ -7,7 +7,7 @@
 $save_path = rtrim(getenv('NOTES_PATH') ?: '/var/lib/notas', '/');
 
 // Shown in the footer next to the GitHub link. Bump it on each release.
-$app_version = '2.3.1';
+$app_version = '2.4';
 $repo_url = 'https://github.com/joseaguardia/web-notepad';
 
 // Attachment limits: size of each file, and total size of all attachments of all notes.
@@ -28,6 +28,343 @@ $note_ttl = ($ttl_env === false || $ttl_env === '' ? 45 : (int) $ttl_env) * 60;
 $max_secrets = (int) (getenv('MAX_SECRETS') ?: 25);
 $secret_expiries = [1, 24, 168];
 $secret_window = 600;
+
+// UI texts. The language comes from the "lang" cookie (set by the footer switcher), else from Accept-Language
+// (curl sends none, so it gets English). The same table goes to the page script, which switches it live.
+$i18n = [
+    'en' => [
+        'err_too_many_notes' => 'Too many notes (max {n} at the same time)',
+        'err_secret_gone' => 'This secret does not exist: it was already opened or it expired.',
+        'err_link_incomplete' => 'This link is not complete: check that it was copied whole, including the part after the "#".',
+        'err_file_name' => 'Invalid file name',
+        'err_file_large' => 'File too large (max {n} MB)',
+        'err_attach_dir' => 'Cannot create attachments directory',
+        'err_empty_file' => 'Empty file',
+        'err_incomplete_upload' => 'Incomplete upload',
+        'err_storage_full' => 'Attachment storage full (max {n} MB in total)',
+        'err_note_changed' => 'This note changed on another device',
+        'err_note_empty' => 'The note is empty',
+        'err_too_many_secrets' => 'Too many secrets (max {n} at the same time)',
+        'err_secrets_dir' => 'Cannot create secrets directory',
+        'err_note_large' => 'Note too large (max {n} MB)',
+        'secret' => 'Secret',
+        'copy_all' => 'copy all',
+        'copy_all_title' => 'Copy all',
+        'refresh' => 'refresh',
+        'refresh_title' => 'This note changed on another device: click to load the server version',
+        'clear' => 'clear',
+        'clear_title' => 'Clear note',
+        'attach' => 'attach file',
+        'attach_title' => 'Attach file (or drop files anywhere)',
+        'make_secret' => 'make it a secret',
+        'make_secret_title' => 'Make it a secret: turn this note into a one-time link',
+        'make_secret_title_short' => 'Make it a secret',
+        'files' => 'Files',
+        'empty' => 'empty',
+        'empty_title' => 'Delete all files (the note text is kept)',
+        'gate_title' => 'Someone shared a secret with you',
+        'once_title' => 'It can be opened only once',
+        'once_text' => 'Opening it deletes it from the server, so copy or download what you need right away.',
+        'open_secret' => 'open secret',
+        'gate_note' => 'Encrypted with AES-256. The key travels only in your link and is never stored on the server.',
+        'gone_title' => 'Secret not available',
+        'gone_text' => 'It was already opened or it expired.',
+        'no_text' => 'No text, only files',
+        'drop' => 'Drop files to attach them (max {n} MB each)',
+        'dialog_text' => 'The text and files of this note become a link that can be opened only once, and the note is deleted.',
+        'dialog_expires' => 'If nobody opens it, it expires in:',
+        'expiry_1' => '1 hour',
+        'expiry_24' => '1 day',
+        'expiry_168' => '1 week',
+        'cancel' => 'cancel',
+        'close' => 'close',
+        'ready_title' => 'Secret ready',
+        'ready_text' => 'Share this link. It can be opened only once.',
+        'copy_link' => 'copy link',
+        'copied' => 'copied',
+        'generate_qr' => 'generate QR',
+        'cli' => 'commands help',
+        'cli_title' => 'Command-line usage',
+        'theme_title' => 'Switch light/dark theme',
+        'repo_title' => 'Source code on GitHub',
+        'modified_title' => 'Last modified',
+        'saved' => 'Saved',
+        'saving' => 'Saving…',
+        'not_saved_conflict' => 'Not saved: changed on another device',
+        'not_saved' => 'Not saved: {reason}',
+        'copy_host' => 'Copy the host',
+        'copy_user' => 'Copy the user',
+        'copy_password' => 'Copy the password',
+        'copy_token' => 'Copy the token',
+        'copy_ssh' => 'Copy the SSH key',
+        'copy_block' => 'Copy this block',
+        'unsaved_note' => 'Unsaved note',
+        'expires_title' => 'Auto-delete in {time}. Click to renew it (or edit the note).',
+        'less_minute' => 'less than a minute',
+        'one_minute' => '1 minute',
+        'minutes' => '{n} minutes',
+        'download' => 'Download',
+        'download_name' => 'Download {name}',
+        'copy_download_command' => 'Copy download command (curl)',
+        'delete_file' => 'Delete file',
+        'upload_failed' => 'Could not upload {name}: {reason}',
+        'network_error' => 'network error',
+        'file_too_large' => '{name} is too large (max {size}).',
+        'download_over' => 'Could not download {name}: the time to download the files is over.',
+        'gate_expires' => 'Expires on {date}h',
+        'open_failed' => 'Could not open the secret.',
+        'opened_info' => 'Secret opened and deleted from the server',
+        'opened_info_files' => 'Secret opened and deleted from the server: download the files before {time}',
+        'cli_upload_text' => 'Upload text',
+        'cli_upload_file' => 'Upload file',
+        'cli_download_file' => 'Download file',
+        'placeholder_command' => '<command>',
+        'placeholder_file' => '<file>',
+        'copy_command' => 'Copy command',
+        'confirm_refresh' => "This note changed on another device and your latest changes here have NOT been saved.\n\nOK: discard them and load the server version.\nCancel: keep them so you can copy them first.",
+        'clear_conflict' => 'This note changed on another device. Click refresh before clearing it.',
+        'secret_conflict' => 'This note changed on another device: click refresh first.',
+        'still_saving' => 'The note is still saving, try again.',
+        'make_failed' => 'Could not make the secret.',
+        'secret_expires_on' => 'If nobody opens it, it expires on {date}.',
+        'network_retry' => 'Network error, try again.',
+        'write_first' => 'Write something or attach a file first.',
+        'language' => 'Language',
+    ],
+    'es' => [
+        'err_too_many_notes' => 'Demasiadas notas (máximo {n} a la vez)',
+        'err_secret_gone' => 'Este secreto no existe: ya se abrió o caducó.',
+        'err_link_incomplete' => 'Este enlace no está completo: comprueba que se copió entero, incluida la parte tras el «#».',
+        'err_file_name' => 'Nombre de archivo no válido',
+        'err_file_large' => 'Archivo demasiado grande (máximo {n} MB)',
+        'err_attach_dir' => 'No se puede crear el directorio de adjuntos',
+        'err_empty_file' => 'Archivo vacío',
+        'err_incomplete_upload' => 'Subida incompleta',
+        'err_storage_full' => 'Almacenamiento de adjuntos lleno (máximo {n} MB en total)',
+        'err_note_changed' => 'Esta nota cambió en otro dispositivo',
+        'err_note_empty' => 'La nota está vacía',
+        'err_too_many_secrets' => 'Demasiados secretos (máximo {n} a la vez)',
+        'err_secrets_dir' => 'No se puede crear el directorio de secretos',
+        'err_note_large' => 'Nota demasiado grande (máximo {n} MB)',
+        'secret' => 'Secreto',
+        'copy_all' => 'copiar todo',
+        'copy_all_title' => 'Copiar todo',
+        'refresh' => 'recargar',
+        'refresh_title' => 'Esta nota cambió en otro dispositivo: haz clic para cargar la versión del servidor',
+        'clear' => 'vaciar',
+        'clear_title' => 'Vaciar la nota',
+        'attach' => 'adjuntar archivo',
+        'attach_title' => 'Adjuntar archivo (o suelta archivos en cualquier parte)',
+        'make_secret' => 'convertir en secreto',
+        'make_secret_title' => 'Convertir en secreto: transforma esta nota en un enlace de un solo uso',
+        'make_secret_title_short' => 'Convertir en secreto',
+        'files' => 'Archivos',
+        'empty' => 'vaciar',
+        'empty_title' => 'Borrar todos los archivos (el texto de la nota se mantiene)',
+        'gate_title' => 'Alguien ha compartido un secreto contigo',
+        'once_title' => 'Solo se puede abrir una vez',
+        'once_text' => 'Al abrirlo se borra del servidor, así que copia o descarga enseguida lo que necesites.',
+        'open_secret' => 'abrir secreto',
+        'gate_note' => 'Cifrado con AES-256. La clave solo viaja en tu enlace y nunca se guarda en el servidor.',
+        'gone_title' => 'Secreto no disponible',
+        'gone_text' => 'Ya se abrió o caducó.',
+        'no_text' => 'Sin texto, solo archivos',
+        'drop' => 'Suelta archivos para adjuntarlos (máximo {n} MB cada uno)',
+        'dialog_text' => 'El texto y los archivos de esta nota se convierten en un enlace que solo se puede abrir una vez, y la nota se borra.',
+        'dialog_expires' => 'Si nadie lo abre, caduca en:',
+        'expiry_1' => '1 hora',
+        'expiry_24' => '1 día',
+        'expiry_168' => '1 semana',
+        'cancel' => 'cancelar',
+        'close' => 'cerrar',
+        'ready_title' => 'Secreto listo',
+        'ready_text' => 'Comparte este enlace. Solo se puede abrir una vez.',
+        'copy_link' => 'copiar enlace',
+        'copied' => 'copiado',
+        'generate_qr' => 'generar QR',
+        'cli' => 'ayuda de comandos',
+        'cli_title' => 'Uso desde la línea de comandos',
+        'theme_title' => 'Cambiar entre tema claro y oscuro',
+        'repo_title' => 'Código fuente en GitHub',
+        'modified_title' => 'Última modificación',
+        'saved' => 'Guardado',
+        'saving' => 'Guardando…',
+        'not_saved_conflict' => 'Sin guardar: cambió en otro dispositivo',
+        'not_saved' => 'Sin guardar: {reason}',
+        'copy_host' => 'Copiar el host',
+        'copy_user' => 'Copiar el usuario',
+        'copy_password' => 'Copiar la contraseña',
+        'copy_token' => 'Copiar el token',
+        'copy_ssh' => 'Copiar la clave SSH',
+        'copy_block' => 'Copiar este bloque',
+        'unsaved_note' => 'Nota sin guardar',
+        'expires_title' => 'Se borrará en {time}. Haz clic para renovarla (o edita la nota).',
+        'less_minute' => 'menos de un minuto',
+        'one_minute' => '1 minuto',
+        'minutes' => '{n} minutos',
+        'download' => 'Descargar',
+        'download_name' => 'Descargar {name}',
+        'copy_download_command' => 'Copiar el comando de descarga (curl)',
+        'delete_file' => 'Borrar archivo',
+        'upload_failed' => 'No se pudo subir {name}: {reason}',
+        'network_error' => 'error de red',
+        'file_too_large' => '{name} es demasiado grande (máximo {size}).',
+        'download_over' => 'No se pudo descargar {name}: se acabó el tiempo para descargar los archivos.',
+        'gate_expires' => 'Caduca el {date}h',
+        'open_failed' => 'No se pudo abrir el secreto.',
+        'opened_info' => 'Secreto abierto y borrado del servidor',
+        'opened_info_files' => 'Secreto abierto y borrado del servidor: descarga los archivos antes de las {time}',
+        'cli_upload_text' => 'Subir texto',
+        'cli_upload_file' => 'Subir archivo',
+        'cli_download_file' => 'Descargar archivo',
+        'placeholder_command' => '<comando>',
+        'placeholder_file' => '<archivo>',
+        'copy_command' => 'Copiar comando',
+        'confirm_refresh' => "Esta nota cambió en otro dispositivo y tus últimos cambios aquí NO se han guardado.\n\nAceptar: descartarlos y cargar la versión del servidor.\nCancelar: conservarlos para poder copiarlos antes.",
+        'clear_conflict' => 'Esta nota cambió en otro dispositivo. Pulsa recargar antes de vaciarla.',
+        'secret_conflict' => 'Esta nota cambió en otro dispositivo: pulsa recargar primero.',
+        'still_saving' => 'La nota aún se está guardando, inténtalo de nuevo.',
+        'make_failed' => 'No se pudo crear el secreto.',
+        'secret_expires_on' => 'Si nadie lo abre, caduca el {date}.',
+        'network_retry' => 'Error de red, inténtalo de nuevo.',
+        'write_first' => 'Escribe algo o adjunta un archivo primero.',
+        'language' => 'Idioma',
+    ],
+    'pt' => [
+        'err_too_many_notes' => 'Notas demais (máximo de {n} ao mesmo tempo)',
+        'err_secret_gone' => 'Este segredo não existe: já foi aberto ou expirou.',
+        'err_link_incomplete' => 'Este link não está completo: verifique se foi copiado inteiro, incluindo a parte depois do "#".',
+        'err_file_name' => 'Nome de arquivo inválido',
+        'err_file_large' => 'Arquivo grande demais (máximo de {n} MB)',
+        'err_attach_dir' => 'Não foi possível criar o diretório de anexos',
+        'err_empty_file' => 'Arquivo vazio',
+        'err_incomplete_upload' => 'Envio incompleto',
+        'err_storage_full' => 'Armazenamento de anexos cheio (máximo de {n} MB no total)',
+        'err_note_changed' => 'Esta nota mudou em outro dispositivo',
+        'err_note_empty' => 'A nota está vazia',
+        'err_too_many_secrets' => 'Segredos demais (máximo de {n} ao mesmo tempo)',
+        'err_secrets_dir' => 'Não foi possível criar o diretório de segredos',
+        'err_note_large' => 'Nota grande demais (máximo de {n} MB)',
+        'secret' => 'Segredo',
+        'copy_all' => 'copiar tudo',
+        'copy_all_title' => 'Copiar tudo',
+        'refresh' => 'recarregar',
+        'refresh_title' => 'Esta nota mudou em outro dispositivo: clique para carregar a versão do servidor',
+        'clear' => 'limpar',
+        'clear_title' => 'Limpar a nota',
+        'attach' => 'anexar arquivo',
+        'attach_title' => 'Anexar arquivo (ou solte arquivos em qualquer lugar)',
+        'make_secret' => 'transformar em segredo',
+        'make_secret_title' => 'Transformar em segredo: converte esta nota em um link de uso único',
+        'make_secret_title_short' => 'Transformar em segredo',
+        'files' => 'Arquivos',
+        'empty' => 'esvaziar',
+        'empty_title' => 'Apagar todos os arquivos (o texto da nota é mantido)',
+        'gate_title' => 'Alguém compartilhou um segredo com você',
+        'once_title' => 'Só pode ser aberto uma vez',
+        'once_text' => 'Ao abri-lo, ele é apagado do servidor, então copie ou baixe na hora o que precisar.',
+        'open_secret' => 'abrir segredo',
+        'gate_note' => 'Criptografado com AES-256. A chave vai apenas no seu link e nunca é armazenada no servidor.',
+        'gone_title' => 'Segredo não disponível',
+        'gone_text' => 'Já foi aberto ou expirou.',
+        'no_text' => 'Sem texto, só arquivos',
+        'drop' => 'Solte arquivos para anexá-los (máximo de {n} MB cada)',
+        'dialog_text' => 'O texto e os arquivos desta nota viram um link que só pode ser aberto uma vez, e a nota é apagada.',
+        'dialog_expires' => 'Se ninguém abrir, expira em:',
+        'expiry_1' => '1 hora',
+        'expiry_24' => '1 dia',
+        'expiry_168' => '1 semana',
+        'cancel' => 'cancelar',
+        'close' => 'fechar',
+        'ready_title' => 'Segredo pronto',
+        'ready_text' => 'Compartilhe este link. Ele só pode ser aberto uma vez.',
+        'copy_link' => 'copiar link',
+        'copied' => 'copiado',
+        'generate_qr' => 'gerar QR',
+        'cli' => 'ajuda de comandos',
+        'cli_title' => 'Uso pela linha de comando',
+        'theme_title' => 'Alternar entre tema claro e escuro',
+        'repo_title' => 'Código-fonte no GitHub',
+        'modified_title' => 'Última modificação',
+        'saved' => 'Salvo',
+        'saving' => 'Salvando…',
+        'not_saved_conflict' => 'Não salvo: mudou em outro dispositivo',
+        'not_saved' => 'Não salvo: {reason}',
+        'copy_host' => 'Copiar o host',
+        'copy_user' => 'Copiar o usuário',
+        'copy_password' => 'Copiar a senha',
+        'copy_token' => 'Copiar o token',
+        'copy_ssh' => 'Copiar a chave SSH',
+        'copy_block' => 'Copiar este bloco',
+        'unsaved_note' => 'Nota não salva',
+        'expires_title' => 'Será apagada em {time}. Clique para renová-la (ou edite a nota).',
+        'less_minute' => 'menos de um minuto',
+        'one_minute' => '1 minuto',
+        'minutes' => '{n} minutos',
+        'download' => 'Baixar',
+        'download_name' => 'Baixar {name}',
+        'copy_download_command' => 'Copiar o comando de download (curl)',
+        'delete_file' => 'Apagar arquivo',
+        'upload_failed' => 'Não foi possível enviar {name}: {reason}',
+        'network_error' => 'erro de rede',
+        'file_too_large' => '{name} é grande demais (máximo de {size}).',
+        'download_over' => 'Não foi possível baixar {name}: o tempo para baixar os arquivos acabou.',
+        'gate_expires' => 'Expira em {date}h',
+        'open_failed' => 'Não foi possível abrir o segredo.',
+        'opened_info' => 'Segredo aberto e apagado do servidor',
+        'opened_info_files' => 'Segredo aberto e apagado do servidor: baixe os arquivos antes das {time}',
+        'cli_upload_text' => 'Enviar texto',
+        'cli_upload_file' => 'Enviar arquivo',
+        'cli_download_file' => 'Baixar arquivo',
+        'placeholder_command' => '<comando>',
+        'placeholder_file' => '<arquivo>',
+        'copy_command' => 'Copiar comando',
+        'confirm_refresh' => "Esta nota mudou em outro dispositivo e suas últimas alterações aqui NÃO foram salvas.\n\nOK: descartá-las e carregar a versão do servidor.\nCancelar: mantê-las para poder copiá-las antes.",
+        'clear_conflict' => 'Esta nota mudou em outro dispositivo. Clique em recarregar antes de limpá-la.',
+        'secret_conflict' => 'Esta nota mudou em outro dispositivo: clique em recarregar primeiro.',
+        'still_saving' => 'A nota ainda está sendo salva, tente de novo.',
+        'make_failed' => 'Não foi possível criar o segredo.',
+        'secret_expires_on' => 'Se ninguém abrir, expira em {date}.',
+        'network_retry' => 'Erro de rede, tente de novo.',
+        'write_first' => 'Escreva algo ou anexe um arquivo primeiro.',
+        'language' => 'Idioma',
+    ],
+];
+
+$lang = $_COOKIE['lang'] ?? '';
+if (!is_string($lang) || !isset($i18n[$lang])) {
+    $lang = 'en';
+    foreach (explode(',', (string) ($_SERVER['HTTP_ACCEPT_LANGUAGE'] ?? '')) as $accepted) {
+        $code = strtolower(substr(trim($accepted), 0, 2));
+        if (isset($i18n[$code])) {
+            $lang = $code;
+            break;
+        }
+    }
+}
+
+function t($key, $args = []) {
+    global $i18n, $lang;
+    $text = $i18n[$lang][$key] ?? $i18n['en'][$key] ?? $key;
+    foreach ($args as $name => $value) {
+        $text = str_replace('{' . $name . '}', $value, $text);
+    }
+    return $text;
+}
+
+function i18n_args($args) {
+    return $args ? ' data-i18n-args="' . htmlspecialchars(json_encode($args), ENT_QUOTES, 'UTF-8') . '"' : '';
+}
+
+// Translated element content (it also closes the opening tag), marked so the page script can switch it.
+function tt($key, $args = []) {
+    print ' data-i18n="' . $key . '"' . i18n_args($args) . '>' . htmlspecialchars(t($key, $args), ENT_QUOTES, 'UTF-8');
+}
+
+// Translated attribute, marked the same way.
+function ta($attr, $key, $args = []) {
+    print ' data-i18n-' . $attr . '="' . $key . '"' . i18n_args($args) . ' ' . $attr . '="' . htmlspecialchars(t($key, $args), ENT_QUOTES, 'UTF-8') . '"';
+}
 
 // Disable caching. The note URL is its only secret, so never send it as a referrer.
 header('Cache-Control: no-store');
@@ -100,7 +437,7 @@ function note_names($save_path) {
 function check_note_limit($save_path, $note, $max_notes) {
     $names = note_names($save_path);
     if (!isset($names[$note]) && count($names) >= $max_notes) {
-        fail(507, "Too many notes (max $max_notes at the same time)");
+        fail(507, t('err_too_many_notes', ['n' => $max_notes]));
     }
 }
 
@@ -254,11 +591,11 @@ if (isset($_GET['s'])) {
         $lock = fopen($save_path . '/.lock', 'c');
         flock($lock, LOCK_EX);
         if (!$dir = find_secret($secrets_path, $_GET['s'], false)) {
-            fail(404, 'This secret does not exist: it was already opened or it expired.');
+            fail(404, t('err_secret_gone'));
         }
         $data = is_file("$dir/data") ? file_get_contents("$dir/data") : '';
         if (!($key = posted_key()) || ($data = unseal($data, $key)) === false) {
-            fail(403, 'This link is not complete: check that it was copied whole, including the part after the "#".');
+            fail(403, t('err_link_incomplete'));
         }
         $data = json_decode($data, true);
         $token = new_secret_id();
@@ -311,18 +648,18 @@ $files_dir = $path . '.files';
 // file_uploads is disabled in PHP on purpose, so no multipart parsing is involved.
 if (isset($_GET['upload']) && ($method === 'POST' || $method === 'PUT')) {
     if (!is_string($_GET['upload'])) {
-        fail(400, 'Invalid file name');
+        fail(400, t('err_file_name'));
     }
     $length = $_SERVER['CONTENT_LENGTH'] ?? '';
     if ($length !== '' && (int) $length > $max_file_size) {
-        fail(413, 'File too large (max ' . ($max_file_size >> 20) . ' MB)');
+        fail(413, t('err_file_large', ['n' => $max_file_size >> 20]));
     }
     // Check the note limit and create the directory under the lock, then release it.
     $lock = fopen($save_path . '/.lock', 'c');
     flock($lock, LOCK_EX);
     check_note_limit($save_path, $_GET['note'], $max_notes);
     if (!is_dir($files_dir) && !@mkdir($files_dir, 0755) && !is_dir($files_dir)) {
-        fail(500, 'Cannot create attachments directory');
+        fail(500, t('err_attach_dir'));
     }
     flock($lock, LOCK_UN);
     $name = sanitize_file_name($_GET['upload']);
@@ -341,20 +678,20 @@ if (isset($_GET['upload']) && ($method === 'POST' || $method === 'PUT')) {
     $copied = stream_copy_to_stream($in, $out, $max_file_size + 1);
     fclose($out);
     if ($copied > $max_file_size) {
-        fail(413, 'File too large (max ' . ($max_file_size >> 20) . ' MB)');
+        fail(413, t('err_file_large', ['n' => $max_file_size >> 20]));
     }
     if ($copied === 0 || $copied === false) {
-        fail(400, 'Empty file');
+        fail(400, t('err_empty_file'));
     }
     if ($length !== '' && $copied !== (int) $length) {
-        fail(400, 'Incomplete upload');
+        fail(400, t('err_incomplete_upload'));
     }
 
     $lock = fopen($save_path . '/.lock', 'c');
     flock($lock, LOCK_EX);
     $target = "$files_dir/$name";
     if (attachments_size($save_path, $target) + $copied > $max_total_size) {
-        fail(507, 'Attachment storage full (max ' . ($max_total_size >> 20) . ' MB in total)');
+        fail(507, t('err_storage_full', ['n' => $max_total_size >> 20]));
     }
     rename($temp, $target);
     send_files($files_dir);
@@ -402,16 +739,16 @@ if (isset($_GET['secret']) && $method === 'POST') {
     $lock = fopen($save_path . '/.lock', 'c');
     flock($lock, LOCK_EX);
     if (isset($_POST['base']) && $_POST['base'] !== note_version($path)) {
-        fail(409, 'This note changed on another device');
+        fail(409, t('err_note_changed'));
     }
     if (!is_file($path) && !list_files($files_dir)) {
-        fail(404, 'The note is empty');
+        fail(404, t('err_note_empty'));
     }
     if (count(secret_ids($secrets_path)) >= $max_secrets) {
-        fail(507, "Too many secrets (max $max_secrets at the same time)");
+        fail(507, t('err_too_many_secrets', ['n' => $max_secrets]));
     }
     if (!is_dir($secrets_path) && !@mkdir($secrets_path, 0755) && !is_dir($secrets_path)) {
-        fail(500, 'Cannot create secrets directory');
+        fail(500, t('err_secrets_dir'));
     }
     $id = new_secret_id();
     $key = random_bytes(32);
@@ -454,7 +791,7 @@ if ($method === 'POST') {
         fail(400, 'Invalid text');
     }
     if (strlen($text) > $max_note_size) {
-        fail(413, 'Note too large (max ' . ($max_note_size >> 20) . ' MB)');
+        fail(413, t('err_note_large', ['n' => $max_note_size >> 20]));
     }
 
     // Serialize the version check and the write across concurrent requests.
@@ -514,11 +851,11 @@ $initial_version = $initial_text === false ? '' : md5($initial_text);
 $initial_mtime = note_mtime($path);
 $initial_files = list_files($files_dir);
 ?><!DOCTYPE html>
-<html>
+<html lang="<?php print $lang === 'pt' ? 'pt-BR' : $lang; ?>">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title><?php print $secret ? 'Secret' : htmlspecialchars($_GET['note'], ENT_QUOTES, 'UTF-8'); ?></title>
+<title><?php print $secret ? t('secret') : htmlspecialchars($_GET['note'], ENT_QUOTES, 'UTF-8'); ?></title>
 <link rel="icon" href="favicon.ico" sizes="any">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -640,7 +977,7 @@ body {
     color: rgb(var(--footer-text));
 }
 /* Dimmed per child rather than on #modified, so the commands popover stays opaque */
-#modified > :not(#cli):not(#saved):not(#secret-info),
+#modified > :not(#cli):not(#saved):not(#secret-info):not(#lang),
 #saved > :not(#expires),
 #cli-toggle {
     opacity: 0.6;
@@ -667,6 +1004,78 @@ body {
     color: inherit;
     text-decoration: none;
     transition: color 0.15s;
+}
+/* Language switcher, centred in the footer (in the flow on narrow screens) */
+#lang {
+    position: absolute;
+    left: 50%;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    transform: translateX(-50%);
+}
+#lang svg {
+    margin-right: 4px;
+    opacity: 0.6;
+}
+#lang button {
+    padding: 0 6px;
+    font: 14px/22px var(--mono);
+    color: inherit;
+    background: transparent;
+    border: 0;
+    border-radius: 999px;
+    opacity: 0.6;
+    cursor: pointer;
+    transition: opacity 0.15s, background 0.15s;
+}
+#lang button:hover {
+    opacity: 1;
+}
+#lang button.active {
+    background: rgba(var(--footer-text), 0.15);
+    opacity: 1;
+}
+/* Narrow screens: no room for everything in one line. The curl help goes away (no use on a phone),
+   the GitHub link keeps only its icon and the save time drops its icon and fixed width. */
+@media (max-width: 800px) {
+    #lang {
+        position: static;
+        margin-right: auto;
+        transform: none;
+    }
+    #lang svg,
+    #cli,
+    #repo .version,
+    #saved > svg {
+        display: none;
+    }
+    #lang button {
+        padding: 0 4px;
+    }
+    #modified,
+    #saved {
+        gap: 6px;
+    }
+    #modified {
+        right: 12px;
+        left: 12px;
+    }
+    #repo,
+    #theme {
+        margin-right: 0;
+    }
+    #saved {
+        min-width: 0;
+    }
+    #secret-info {
+        display: none;
+    }
+}
+@media (max-width: 359px) {
+    #repo {
+        display: none;
+    }
 }
 /* Shows the icon of the theme it switches to */
 #theme {
@@ -1376,6 +1785,7 @@ body.secret-view {
     color: rgb(var(--warn));
 }
 #secret-info {
+    max-width: calc(50% - 130px);
     margin-right: auto;
     overflow: hidden;
     white-space: nowrap;
@@ -1601,7 +2011,7 @@ body.dragging #drop {
 </head>
 <body<?php if ($secret) { print ' class="secret-view"'; } ?>>
 <div class="container">
-<textarea id="content"<?php if ($secret) { print ' readonly placeholder="No text, only files"'; } ?>><?php
+<textarea id="content"<?php if ($secret) { print ' readonly'; ta('placeholder', 'no_text'); } ?>><?php
 if ($initial_text !== false) {
     print htmlspecialchars($initial_text, ENT_QUOTES, 'UTF-8');
 }
@@ -1609,72 +2019,137 @@ if ($initial_text !== false) {
 <div id="glow"><div id="glow-inner"></div></div>
 <div id="gutter"><div id="gutter-inner"></div></div>
 <div id="mirror" aria-hidden="true"></div>
-<button id="copy-all" class="action" type="button" title="Copy all"><svg class="icon-copy" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg><svg class="icon-check" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg><small>copy all</small></button>
+<button id="copy-all" class="action" type="button"<?php ta('title', 'copy_all_title'); ?>><svg class="icon-copy" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg><svg class="icon-check" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg><small<?php tt('copy_all'); ?></small></button>
 <?php if (!$secret): ?>
-<button id="refresh" class="action" type="button" title="This note changed on another device: click to load the server version"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg><small>refresh</small></button>
-<button id="clear" class="action" type="button" title="Clear note"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m16 22-1-4"/><path d="M19 14a1 1 0 0 0 1-1v-1a2 2 0 0 0-2-2h-3a1 1 0 0 1-1-1V4a2 2 0 0 0-4 0v5a1 1 0 0 1-1 1H6a2 2 0 0 0-2 2v1a1 1 0 0 0 1 1"/><path d="M5 14h14l1.973 6.767A1 1 0 0 1 20 22H4a1 1 0 0 1-.973-1.233z"/><path d="m8 22 1-4"/></svg><small>clear</small></button>
-<button id="attach" class="action" type="button" title="Attach file (or drop files anywhere)"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg><small>attach file</small></button>
-<button id="make-secret" class="action" type="button" title="Make it a secret: turn this note into a one-time link"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".5" fill="currentColor"/></svg><small>make it a secret</small></button>
+<button id="refresh" class="action" type="button"<?php ta('title', 'refresh_title'); ?>><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg><small<?php tt('refresh'); ?></small></button>
+<button id="clear" class="action" type="button"<?php ta('title', 'clear_title'); ?>><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m16 22-1-4"/><path d="M19 14a1 1 0 0 0 1-1v-1a2 2 0 0 0-2-2h-3a1 1 0 0 1-1-1V4a2 2 0 0 0-4 0v5a1 1 0 0 1-1 1H6a2 2 0 0 0-2 2v1a1 1 0 0 0 1 1"/><path d="M5 14h14l1.973 6.767A1 1 0 0 1 20 22H4a1 1 0 0 1-.973-1.233z"/><path d="m8 22 1-4"/></svg><small<?php tt('clear'); ?></small></button>
+<button id="attach" class="action" type="button"<?php ta('title', 'attach_title'); ?>><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg><small<?php tt('attach'); ?></small></button>
+<button id="make-secret" class="action" type="button"<?php ta('title', 'make_secret_title'); ?>><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".5" fill="currentColor"/></svg><small<?php tt('make_secret'); ?></small></button>
 <input id="file-input" type="file" multiple hidden>
 <?php endif; ?>
 </div>
 <div id="files">
-<div id="files-title">Files <span id="files-count">0</span></div>
+<div id="files-title"><span<?php tt('files'); ?></span> <span id="files-count">0</span></div>
 <div id="files-list"></div>
 <?php if (!$secret): ?>
-<button id="empty" type="button" title="Delete all files (the note text is kept)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>empty</button>
+<button id="empty" type="button"<?php ta('title', 'empty_title'); ?>><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg><span<?php tt('empty'); ?></span></button>
 <?php endif; ?>
 </div>
 <?php if ($secret): ?>
 <div id="gate"><div class="card">
 <?php if ($secret['id']): ?>
 <div class="gate-badge"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".5" fill="currentColor"/></svg></div>
-<h2>Someone shared a secret with you</h2>
-<div class="once"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg><div><strong>It can be opened only once</strong>Opening it deletes it from the server, so copy or download what you need right away.</div></div>
+<h2<?php tt('gate_title'); ?></h2>
+<div class="once"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg><div><strong<?php tt('once_title'); ?></strong><span<?php tt('once_text'); ?></span></div></div>
 <p class="gate-meta"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg><span id="gate-expires"></span></p>
 <p id="gate-error" class="error" hidden></p>
-<div class="choices"><button id="open-secret" class="card-button solid" type="button"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg>open secret</button></div>
-<p class="gate-note"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg><span>Encrypted with AES-256. The key travels only in your link and is never stored on the server.</span></p>
+<div class="choices"><button id="open-secret" class="card-button solid" type="button"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg><span<?php tt('open_secret'); ?></span></button></div>
+<p class="gate-note"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg><span<?php tt('gate_note'); ?></span></p>
 <?php else: ?>
 <div class="gate-badge gone"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg></div>
-<h2>Secret not available</h2>
-<p class="muted">It was already opened or it expired.</p>
+<h2<?php tt('gone_title'); ?></h2>
+<p class="muted"<?php tt('gone_text'); ?></p>
 <?php endif; ?>
 </div></div>
 <?php else: ?>
-<div id="drop">Drop files to attach them (max <?php print $max_file_size >> 20; ?> MB each)</div>
+<div id="drop"<?php tt('drop', ['n' => $max_file_size >> 20]); ?></div>
 <dialog id="secret-dialog" class="card">
 <div id="secret-ask">
-<h2><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>Make it a secret</h2>
-<p>The text and files of this note become a link that can be opened only once, and the note is deleted.</p>
-<p class="muted">If nobody opens it, it expires in:</p>
-<div class="choices"><?php foreach ($secret_expiries as $hours): ?><button class="card-button" type="button" data-hours="<?php print $hours; ?>"><?php print $hours === 1 ? '1 hour' : ($hours < 168 ? ($hours / 24) . ' day' . ($hours > 24 ? 's' : '') : ($hours / 168) . ' week' . ($hours > 168 ? 's' : '')); ?></button><?php endforeach; ?></div>
+<h2><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg><span<?php tt('make_secret_title_short'); ?></span></h2>
+<p<?php tt('dialog_text'); ?></p>
+<p class="muted"<?php tt('dialog_expires'); ?></p>
+<div class="choices"><?php foreach ($secret_expiries as $hours): ?><button class="card-button" type="button" data-hours="<?php print $hours; ?>"<?php tt("expiry_$hours"); ?></button><?php endforeach; ?></div>
 <p id="secret-error" class="error" hidden></p>
-<div class="choices end"><button class="card-button secondary secret-close" type="button">cancel</button></div>
+<div class="choices end"><button class="card-button secondary secret-close" type="button"<?php tt('cancel'); ?></button></div>
 </div>
 <div id="secret-done" hidden>
-<h2><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>Secret ready</h2>
-<p>Share this link. It can be opened only once.</p>
+<h2><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg><span<?php tt('ready_title'); ?></span></h2>
+<p<?php tt('ready_text'); ?></p>
 <div class="link"><code id="secret-link"></code></div>
 <div id="secret-copy-row" class="choices"><button id="secret-copy" class="card-button solid" type="button"></button></div>
 <p id="secret-expires" class="muted"></p>
-<div id="secret-qr-row" class="choices"><button id="secret-qr-button" class="card-button" type="button"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="5" height="5" x="3" y="3" rx="1"/><rect width="5" height="5" x="16" y="3" rx="1"/><rect width="5" height="5" x="3" y="16" rx="1"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/><path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/><path d="M3 12h.01"/><path d="M12 3h.01"/><path d="M12 16v.01"/><path d="M16 12h1"/><path d="M21 12v.01"/><path d="M12 21v-1"/></svg>generate QR</button></div>
+<div id="secret-qr-row" class="choices"><button id="secret-qr-button" class="card-button" type="button"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="5" height="5" x="3" y="3" rx="1"/><rect width="5" height="5" x="16" y="3" rx="1"/><rect width="5" height="5" x="3" y="16" rx="1"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/><path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/><path d="M3 12h.01"/><path d="M12 3h.01"/><path d="M12 16v.01"/><path d="M16 12h1"/><path d="M21 12v.01"/><path d="M12 21v-1"/></svg><span<?php tt('generate_qr'); ?></span></button></div>
 <div id="secret-qr" hidden></div>
-<div class="choices end"><button class="card-button secondary secret-close" type="button">close</button></div>
+<div class="choices end"><button class="card-button secondary secret-close" type="button"<?php tt('close'); ?></button></div>
 </div>
 </dialog>
 <?php endif; ?>
-<div id="modified"><?php if ($secret): ?><span id="secret-info"></span><?php else: ?><div id="cli"><div id="cli-panel"><div id="cli-list"></div></div><button id="cli-toggle" type="button" aria-expanded="false" title="Command-line usage"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></svg>commands help</button></div><?php endif; ?><button id="theme" type="button" title="Switch light/dark theme"><svg class="icon-sun" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg><svg class="icon-moon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg></button><a id="repo" href="<?php print $repo_url; ?>" target="_blank" rel="noopener noreferrer" title="Source code on GitHub"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.93.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.22.165.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>v<?php print $app_version; ?></a><?php if (!$secret): ?><span id="saved"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M12 7v5l3 2"/></svg><span id="modified-time" title="Last modified"></span><button id="expires" type="button" hidden><span id="expires-fill"></span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg><span id="expires-label"></span></button></span><span id="status"></span><?php endif; ?></div>
+<div id="modified"><?php if ($secret): ?><span id="secret-info"></span><?php else: ?><div id="cli"><div id="cli-panel"><div id="cli-list"></div></div><button id="cli-toggle" type="button" aria-expanded="false"<?php ta('title', 'cli_title'); ?>><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></svg><span<?php tt('cli'); ?></span></button></div><?php endif; ?><div id="lang"<?php ta('title', 'language'); ?>><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg><?php foreach (['es' => 'Español', 'en' => 'English', 'pt' => 'Português (Brasil)'] as $code => $name): ?><button type="button" data-lang="<?php print $code; ?>" title="<?php print $name; ?>"<?php if ($code === $lang) { print ' class="active"'; } ?>><?php print strtoupper($code); ?></button><?php endforeach; ?></div><button id="theme" type="button"<?php ta('title', 'theme_title'); ?>><svg class="icon-sun" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg><svg class="icon-moon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg></button><a id="repo" href="<?php print $repo_url; ?>" target="_blank" rel="noopener noreferrer"<?php ta('title', 'repo_title'); ?>><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.93.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.22.165.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><span class="version">v<?php print $app_version; ?></span></a><?php if (!$secret): ?><span id="saved"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M12 7v5l3 2"/></svg><span id="modified-time"<?php ta('title', 'modified_title'); ?>></span><button id="expires" type="button" hidden><span id="expires-fill"></span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg><span id="expires-label"></span></button></span><span id="status"></span><?php endif; ?></div>
 <pre id="printable"></pre>
 <script>
+// Translations (the $i18n table). Texts marked with data-i18n, data-i18n-title or data-i18n-placeholder
+// (plus data-i18n-args) are switched by setLang(); computed ones are rebuilt by the onLang() callbacks.
+var I18N = <?php print json_encode($i18n, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP); ?>;
+var LANG = '<?php print $lang; ?>';
+var LOCALES = {en: 'en-GB', es: 'es-ES', pt: 'pt-BR'};
+var langCallbacks = [];
+
+function t(key, args) {
+    var text = I18N[LANG][key] || I18N.en[key] || key;
+    for (var name in args || {}) {
+        text = text.split('{' + name + '}').join(args[name]);
+    }
+    return text;
+}
+
+// Sets a translated text (or attribute) and marks it so switching the language translates it again.
+function tr(el, key, args, attr) {
+    el.dataset[attr ? 'i18n' + attr.charAt(0).toUpperCase() + attr.slice(1) : 'i18n'] = key;
+    if (args) {
+        el.dataset.i18nArgs = JSON.stringify(args);
+    }
+    if (attr) {
+        el.setAttribute(attr, t(key, args));
+    } else {
+        el.textContent = t(key, args);
+    }
+}
+
+// Runs now and again after every language switch.
+function onLang(callback) {
+    langCallbacks.push(callback);
+    callback();
+}
+
+function setLang(lang) {
+    LANG = lang;
+    document.documentElement.lang = lang === 'pt' ? 'pt-BR' : lang;
+    document.cookie = 'lang=' + lang + '; path=' + window.location.pathname.replace(/[^\/]*$/, '')
+        + '; max-age=31536000; SameSite=Lax' + (window.location.protocol === 'https:' ? '; Secure' : '');
+    Array.prototype.forEach.call(document.querySelectorAll('[data-i18n], [data-i18n-title], [data-i18n-placeholder]'), function(el) {
+        var args = el.dataset.i18nArgs ? JSON.parse(el.dataset.i18nArgs) : null;
+        if (el.dataset.i18n) {
+            el.textContent = t(el.dataset.i18n, args);
+        }
+        if (el.dataset.i18nTitle) {
+            el.title = t(el.dataset.i18nTitle, args);
+        }
+        if (el.dataset.i18nPlaceholder) {
+            el.placeholder = t(el.dataset.i18nPlaceholder, args);
+        }
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('#lang button'), function(button) {
+        button.classList.toggle('active', button.dataset.lang === lang);
+    });
+    langCallbacks.forEach(function(callback) {
+        callback();
+    });
+}
+
+Array.prototype.forEach.call(document.querySelectorAll('#lang button'), function(button) {
+    button.onclick = function() {
+        setLang(button.dataset.lang);
+    };
+});
+
 function updateStatus() {
     var state = conflict ? 'conflict' : (saveError ? 'error' : (content !== textarea.value ? 'saving' : 'saved'));
     statusDot.className = state;
     statusDot.title = {
-        saved: 'Saved',
-        saving: 'Saving…',
-        conflict: 'Not saved: changed on another device',
-        error: 'Not saved: ' + saveError
+        saved: t('saved'),
+        saving: t('saving'),
+        conflict: t('not_saved_conflict'),
+        error: t('not_saved', {reason: saveError})
     }[state];
 }
 
@@ -1779,7 +2254,7 @@ function uploadContent() {
 
     // Over the size limit the server would answer 413: don't send it, flag it until the text shrinks.
     if (new Blob([textarea.value]).size > MAX_NOTE_SIZE) {
-        setSaveError('Note too large (max ' + (MAX_NOTE_SIZE >> 20) + ' MB)');
+        setSaveError(t('err_note_large', {n: MAX_NOTE_SIZE >> 20}));
         return;
     }
     saving = true;
@@ -1880,16 +2355,15 @@ var COPY_ICONS = '<svg class="icon-copy" width="18" height="18" viewBox="0 0 24 
 // contains one of these words (the first matching type wins, so "Mail password" is a password and "SSH clave" an SSH key),
 // SSH keys and well-known token formats. Each one is { start, end, type, value } (offsets of its lines).
 var SENSITIVE_LABELS = [
-    ['ssh', /(?:^|[^\p{L}\d])(?:ssh|private[ _-]?key|clave privada)(?![\p{L}\d])/iu],
-    ['password', /(?:^|[^\p{L}\d])(?:pass(?:word|wd)?|pwd|contraseña|clave)(?![\p{L}\d])/iu],
+    ['ssh', /(?:^|[^\p{L}\d])(?:ssh|private[ _-]?key|clave privada|chave privada)(?![\p{L}\d])/iu],
+    ['password', /(?:^|[^\p{L}\d])(?:pass(?:word|wd)?|pwd|contraseña|clave|senha|chave)(?![\p{L}\d])/iu],
     ['token', /(?:^|[^\p{L}\d])(?:token|api[ _-]?key|secret)(?![\p{L}\d])/iu],
-    ['user', /(?:^|[^\p{L}\d])(?:user(?:name)?|usuario|login|e-?mail|mail|correo)(?![\p{L}\d])/iu],
+    ['user', /(?:^|[^\p{L}\d])(?:user(?:name)?|usuario|usuário|login|e-?mail|mail|correo)(?![\p{L}\d])/iu],
     ['host', /(?:^|[^\p{L}\d])(?:host(?:name)?|server|servidor|ip|url|uri|endpoint|domain|dominio)(?![\p{L}\d])/iu],
     // "API" alone last, so "API URL" stays a host
     ['token', /(?:^|[^\p{L}\d])api(?![\p{L}\d])/iu]
 ];
 var TOKEN_PATTERN = /(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_\w{20,}|glpat-[\w-]{20,}|AKIA[0-9A-Z]{16}|xox[abprs]-[\w-]{10,}|sk-[\w-]{20,}|eyJ[\w-]{10,}\.[\w-]{10,}\.[\w-]+)/;
-var SENSITIVE_TITLES = {host: 'Copy the host', user: 'Copy the user', password: 'Copy the password', token: 'Copy the token', ssh: 'Copy the SSH key'};
 var SENSITIVE_ICONS = {
     host: '<rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><line x1="7" y1="7.5" x2="7.01" y2="7.5"/><line x1="7" y1="16.5" x2="7.01" y2="16.5"/>',
     user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
@@ -1972,12 +2446,12 @@ function updateGutter() {
         button.type = 'button';
         if (SECRET_VIEW) {
             button.className = 'copy-btn sensitive ' + block.type;
-            button.title = SENSITIVE_TITLES[block.type];
+            button.title = t('copy_' + block.type);
             button.innerHTML = '<svg class="icon-copy" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
                 + SENSITIVE_ICONS[block.type] + '</svg>' + COPY_ICONS.slice(COPY_ICONS.indexOf('<svg class="icon-check"'));
         } else {
             button.className = 'copy-btn';
-            button.title = 'Copy this block';
+            button.title = t('copy_block');
             button.innerHTML = COPY_ICONS;
         }
         button.style.top = markers[i].offsetTop + 'px';
@@ -2020,8 +2494,8 @@ function showModified() {
         return Math.max(max, file.mtime);
     }, mtime);
     modifiedLabel.textContent = latest
-        ? new Date(latest * 1000).toLocaleTimeString('en-GB', {hour: '2-digit', minute: '2-digit'})
-        : 'Unsaved note';
+        ? formatTime(latest)
+        : t('unsaved_note');
     showExpiry(Math.max(latest, filesChanged));
 }
 
@@ -2037,8 +2511,7 @@ function showExpiry(changed) {
     var left = Math.ceil(seconds / 60);
     expiresFill.style.width = (seconds / NOTE_TTL * 100) + '%';
     expires.classList.toggle('soon', left <= 10);
-    expires.title = 'Auto-delete in ' + (seconds < 60 ? 'less than a minute' : left + (left === 1 ? ' minute' : ' minutes'))
-        + '. Click to renew it (or edit the note).';
+    expires.title = t('expires_title', {time: seconds < 60 ? t('less_minute') : left === 1 ? t('one_minute') : t('minutes', {n: left})});
     expiresLabel.textContent = (seconds < 60 ? '<1' : left) + ' min';
 }
 
@@ -2084,7 +2557,7 @@ function fileRow(name, detail, href) {
     label.title = name;
     if (href) {
         label.href = href;
-        label.title = 'Download ' + name;
+        tr(label, 'download_name', {name: name}, 'title');
     }
     meta.appendChild(label);
     var details = document.createElement('div');
@@ -2110,13 +2583,13 @@ function renderFiles() {
         var download = document.createElement('a');
         download.className = 'file-action';
         download.href = href;
-        download.title = 'Download';
+        download.title = t('download');
         download.innerHTML = DOWNLOAD_ICON;
         details.appendChild(download);
         var command = document.createElement('button');
         command.type = 'button';
         command.className = 'file-action';
-        command.title = 'Copy download command (curl)';
+        command.title = t('copy_download_command');
         command.innerHTML = COMMAND_ICONS;
         command.onclick = function() {
             copyBlock('curl -O ' + noteUrl + '/' + file.name, command);
@@ -2125,7 +2598,7 @@ function renderFiles() {
         var remove = document.createElement('button');
         remove.type = 'button';
         remove.className = 'remove';
-        remove.title = 'Delete file';
+        remove.title = t('delete_file');
         remove.textContent = '×';
         remove.onclick = function() {
             fileRequest('POST', '?delete=' + encodeURIComponent(file.name));
@@ -2202,7 +2675,7 @@ function nextUpload() {
             applyFiles(request);
         } else {
             renderFiles();
-            alert('Could not upload ' + upload.file.name + ': ' + (request.responseText || 'network error'));
+            alert(t('upload_failed', {name: upload.file.name, reason: request.responseText || t('network_error')}));
         }
         nextUpload();
     };
@@ -2212,7 +2685,7 @@ function nextUpload() {
 function uploadFiles(list) {
     Array.prototype.forEach.call(list, function(file) {
         if (file.size > MAX_FILE_SIZE) {
-            alert(file.name + ' is too large (max ' + formatSize(MAX_FILE_SIZE) + ').');
+            alert(t('file_too_large', {name: file.name, size: formatSize(MAX_FILE_SIZE)}));
         } else {
             uploads.push({file: file, progress: 0});
         }
@@ -2256,6 +2729,7 @@ systemLight.addEventListener('change', function() {
 });
 
 updateGutter();
+langCallbacks.push(scheduleGutter);
 if (document.fonts) {
     document.fonts.ready.then(scheduleGutter);
     document.fonts.addEventListener('loadingdone', scheduleGutter);
@@ -2272,7 +2746,11 @@ copyAllButton.onclick = function() {
 };
 
 function formatDate(seconds) {
-    return new Date(seconds * 1000).toLocaleString('en-GB', {weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'});
+    return new Date(seconds * 1000).toLocaleString(LOCALES[LANG], {weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'});
+}
+
+function formatTime(seconds) {
+    return new Date(seconds * 1000).toLocaleTimeString(LOCALES[LANG], {hour: '2-digit', minute: '2-digit'});
 }
 <?php if ($secret): ?>
 // Secret page: opening it (POST) deletes it from the server and returns its text and files.
@@ -2281,9 +2759,15 @@ var SECRET_KEY = window.location.hash.slice(1);
 var openButton = document.getElementById('open-secret');
 var secretInfo = document.getElementById('secret-info');
 
-function showGateError(message) {
+// A key is translated (and switched with the language); a server message is shown as is (already translated).
+function showGateError(message, key) {
     var error = document.getElementById('gate-error');
-    error.textContent = message;
+    if (key) {
+        tr(error, key);
+    } else {
+        delete error.dataset.i18n;
+        error.textContent = message;
+    }
     error.hidden = false;
 }
 
@@ -2295,7 +2779,7 @@ function downloadSecretFile(token, index, name) {
     request.responseType = 'blob';
     request.onload = function() {
         if (request.status !== 200) {
-            alert('Could not download ' + name + ': the time to download the files is over.');
+            alert(t('download_over', {name: name}));
             return;
         }
         var link = document.createElement('a');
@@ -2312,18 +2796,20 @@ function downloadSecretFile(token, index, name) {
 }
 
 if (openButton && !SECRET_KEY) {
-    showGateError('This link is not complete: check that it was copied whole, including the part after the "#".');
+    showGateError('', 'err_link_incomplete');
     openButton.parentNode.style.display = 'none';
 }
 if (openButton) {
-    document.getElementById('gate-expires').textContent = 'Expires on ' + formatDate(<?php print $secret['expires']; ?>) + 'h';
+    onLang(function() {
+        document.getElementById('gate-expires').textContent = t('gate_expires', {date: formatDate(<?php print $secret['expires']; ?>)});
+    });
     openButton.onclick = function() {
         openButton.disabled = true;
         var request = new XMLHttpRequest();
         request.open('POST', window.location.pathname + '?s=' + encodeURIComponent(SECRET_ID) + '&open', true);
         request.onload = function() {
             if (request.status !== 200) {
-                showGateError(request.responseText || 'Could not open the secret.');
+                showGateError(request.responseText, request.responseText ? '' : 'open_failed');
                 openButton.parentNode.style.display = 'none';
                 return;
             }
@@ -2331,9 +2817,9 @@ if (openButton) {
             textarea.value = data.text;
             document.body.classList.add('opened');
             document.body.classList.toggle('has-files', data.files.length > 0);
-            secretInfo.textContent = 'Secret opened and deleted from the server'
-                + (data.files.length ? ': download the files before '
-                + new Date(data.until * 1000).toLocaleTimeString('en-GB', {hour: '2-digit', minute: '2-digit'}) : '');
+            onLang(function() {
+                secretInfo.textContent = data.files.length ? t('opened_info_files', {time: formatTime(data.until)}) : t('opened_info');
+            });
             document.getElementById('files-count').textContent = data.files.length;
             var list = document.getElementById('files-list');
             data.files.forEach(function(file, index) {
@@ -2341,7 +2827,7 @@ if (openButton) {
                 var download = document.createElement('button');
                 download.type = 'button';
                 download.className = 'file-action';
-                download.title = 'Download';
+                tr(download, 'download', null, 'title');
                 download.innerHTML = DOWNLOAD_ICON;
                 row.querySelector('.details').appendChild(download);
                 row.querySelector('.name').onclick = download.onclick = function(event) {
@@ -2367,28 +2853,31 @@ var cli = document.getElementById('cli');
 var cliToggle = document.getElementById('cli-toggle');
 var cliList = document.getElementById('cli-list');
 // [label, shown command, copied text if different: the placeholder is left out so it can follow a command]
-[
-    ['Upload text', '<command> | curl --data-binary @- ' + noteUrl, ' | curl --data-binary @- ' + noteUrl],
-    ['Upload file', 'curl -T <file> ' + noteUrl + '/'],
-    ['Download file', 'curl -O ' + noteUrl + '/<file>']
-].forEach(function(item) {
-    var label = document.createElement('span');
-    label.textContent = item[0];
-    var code = document.createElement('code');
-    code.textContent = item[1];
-    code.title = item[1];
-    var copy = document.createElement('button');
-    copy.type = 'button';
-    copy.className = 'file-action';
-    copy.title = 'Copy command';
-    copy.innerHTML = COPY_ICONS;
-    // The whole row copies; the button shows the feedback
-    label.onclick = code.onclick = copy.onclick = function() {
-        copyBlock(item[2] || item[1], copy);
-    };
-    cliList.appendChild(label);
-    cliList.appendChild(code);
-    cliList.appendChild(copy);
+onLang(function() {
+    cliList.textContent = '';
+    [
+        [t('cli_upload_text'), t('placeholder_command') + ' | curl --data-binary @- ' + noteUrl, ' | curl --data-binary @- ' + noteUrl],
+        [t('cli_upload_file'), 'curl -T ' + t('placeholder_file') + ' ' + noteUrl + '/'],
+        [t('cli_download_file'), 'curl -O ' + noteUrl + '/' + t('placeholder_file')]
+    ].forEach(function(item) {
+        var label = document.createElement('span');
+        label.textContent = item[0];
+        var code = document.createElement('code');
+        code.textContent = item[1];
+        code.title = item[1];
+        var copy = document.createElement('button');
+        copy.type = 'button';
+        copy.className = 'file-action';
+        copy.title = t('copy_command');
+        copy.innerHTML = COPY_ICONS;
+        // The whole row copies; the button shows the feedback
+        label.onclick = code.onclick = copy.onclick = function() {
+            copyBlock(item[2] || item[1], copy);
+        };
+        cliList.appendChild(label);
+        cliList.appendChild(code);
+        cliList.appendChild(copy);
+    });
 });
 
 function setCliOpen(open) {
@@ -2477,11 +2966,12 @@ document.addEventListener('drop', function(e) {
 });
 showModified();
 updateStatus();
+langCallbacks.push(updateStatus, renderFiles);
 textarea.addEventListener('input', updateStatus);
 
 // Only visible while in conflict.
 refreshButton.onclick = function() {
-    if (!confirm('This note changed on another device and your latest changes here have NOT been saved.\n\nOK: discard them and load the server version.\nCancel: keep them so you can copy them first.')) {
+    if (!confirm(t('confirm_refresh'))) {
         return;
     }
     refreshButton.disabled = true;
@@ -2518,7 +3008,7 @@ expires.onclick = function() {
 var clearButton = document.getElementById('clear');
 clearButton.onclick = function() {
     if (conflict) {
-        alert('This note changed on another device. Click refresh before clearing it.');
+        alert(t('clear_conflict'));
         return;
     }
 
@@ -2730,7 +3220,17 @@ var secretDone = document.getElementById('secret-done');
 var secretError = document.getElementById('secret-error');
 var secretChoices = secretAsk.querySelectorAll('[data-hours]');
 var secretCopy = document.getElementById('secret-copy');
-secretCopy.innerHTML = COPY_ICONS + '<span class="copy-label">copy link</span><span class="copied-label">copied</span>';
+secretCopy.innerHTML = COPY_ICONS + '<span class="copy-label" data-i18n="copy_link"></span><span class="copied-label" data-i18n="copied"></span>';
+secretCopy.querySelector('.copy-label').textContent = t('copy_link');
+secretCopy.querySelector('.copied-label').textContent = t('copied');
+
+var secretExpiresAt = 0;
+function showSecretExpires() {
+    if (secretExpiresAt) {
+        document.getElementById('secret-expires').textContent = t('secret_expires_on', {date: formatDate(secretExpiresAt)});
+    }
+}
+langCallbacks.push(showSecretExpires);
 
 function setSecretBusy(busy) {
     Array.prototype.forEach.call(secretChoices, function(button) {
@@ -2747,7 +3247,7 @@ function showSecretError(message) {
 // Call back when the text is saved and no upload is pending; gives up after 10 seconds.
 function whenSaved(callback, tries) {
     if (conflict || saveError) {
-        showSecretError(conflict ? 'This note changed on another device: click refresh first.' : 'Not saved: ' + saveError);
+        showSecretError(conflict ? t('secret_conflict') : t('not_saved', {reason: saveError}));
     } else if (!saving && !uploads.length && content === textarea.value) {
         callback();
     } else if ((tries || 0) < 40) {
@@ -2755,7 +3255,7 @@ function whenSaved(callback, tries) {
             whenSaved(callback, (tries || 0) + 1);
         }, 250);
     } else {
-        showSecretError('The note is still saving, try again.');
+        showSecretError(t('still_saving'));
     }
 }
 
@@ -2768,13 +3268,14 @@ function makeSecret(hours) {
             if (request.status === 409) {
                 setConflict(true);
             }
-            showSecretError(request.responseText || 'Could not make the secret.');
+            showSecretError(request.responseText || t('make_failed'));
             return;
         }
         var data = JSON.parse(request.responseText);
         var link = window.location.origin + window.location.pathname.replace(/[^\/]*$/, '') + '?s=' + data.id + '#' + data.key;
         document.getElementById('secret-link').textContent = link;
-        document.getElementById('secret-expires').textContent = 'If nobody opens it, it expires on ' + formatDate(data.expires) + '.';
+        secretExpiresAt = data.expires;
+        showSecretExpires();
         secretCopy.onclick = function() {
             copyBlock(link, secretCopy);
         };
@@ -2800,14 +3301,14 @@ function makeSecret(hours) {
         updateGutter();
     };
     request.onerror = function() {
-        showSecretError('Network error, try again.');
+        showSecretError(t('network_retry'));
     };
     request.send('base=' + encodeURIComponent(version));
 }
 
 document.getElementById('make-secret').onclick = function() {
     if (!textarea.value.trim() && !files.length && !uploads.length) {
-        alert('Write something or attach a file first.');
+        alert(t('write_first'));
         return;
     }
     secretAsk.hidden = false;
