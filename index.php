@@ -7,7 +7,7 @@
 $save_path = rtrim(getenv('NOTES_PATH') ?: '/var/lib/notas', '/');
 
 // Shown in the footer next to the GitHub link. Bump it on each release.
-$app_version = '2.4';
+$app_version = '2.5';
 $repo_url = 'https://github.com/joseaguardia/web-notepad';
 
 // Attachment limits: size of each file, and total size of all attachments of all notes.
@@ -105,8 +105,8 @@ $i18n = [
         'minutes' => '{n} minutes',
         'download' => 'Download',
         'download_name' => 'Download {name}',
+        'downloads_count' => 'Downloaded {n} times',
         'copy_download_command' => 'Copy download command (curl)',
-        'delete_file' => 'Delete file',
         'upload_failed' => 'Could not upload {name}: {reason}',
         'network_error' => 'network error',
         'file_too_large' => '{name} is too large (max {size}).',
@@ -204,8 +204,8 @@ $i18n = [
         'minutes' => '{n} minutos',
         'download' => 'Descargar',
         'download_name' => 'Descargar {name}',
+        'downloads_count' => 'Descargado {n} veces',
         'copy_download_command' => 'Copiar el comando de descarga (curl)',
-        'delete_file' => 'Borrar archivo',
         'upload_failed' => 'No se pudo subir {name}: {reason}',
         'network_error' => 'error de red',
         'file_too_large' => '{name} es demasiado grande (máximo {size}).',
@@ -303,8 +303,8 @@ $i18n = [
         'minutes' => '{n} minutos',
         'download' => 'Baixar',
         'download_name' => 'Baixar {name}',
+        'downloads_count' => 'Baixado {n} vezes',
         'copy_download_command' => 'Copiar o comando de download (curl)',
-        'delete_file' => 'Apagar arquivo',
         'upload_failed' => 'Não foi possível enviar {name}: {reason}',
         'network_error' => 'erro de rede',
         'file_too_large' => '{name} é grande demais (máximo de {size}).',
@@ -397,12 +397,45 @@ function sanitize_file_name($name) {
 
 function list_files($dir) {
     $files = [];
+    $downloads = read_downloads($dir);
     foreach (is_dir($dir) ? scandir($dir) : [] as $name) {
         if (valid_file_name($name) && is_file("$dir/$name")) {
-            $files[] = ['name' => $name, 'size' => filesize("$dir/$name"), 'mtime' => filemtime("$dir/$name")];
+            $files[] = ['name' => $name, 'size' => filesize("$dir/$name"), 'mtime' => filemtime("$dir/$name"),
+                'downloads' => $downloads[$name] ?? 0];
         }
     }
     return $files;
+}
+
+// Download counts per attachment, kept in the hidden "<note>.files/.downloads" (JSON {name: count}).
+function read_downloads($dir) {
+    $data = is_file("$dir/.downloads") ? json_decode(file_get_contents("$dir/.downloads"), true) : null;
+    return is_array($data) ? $data : [];
+}
+
+// Set (or with null, forget) the count of one file; call it under the lock. The file is rewritten in place
+// and the directory mtime restored, since a download must not count as a change for the note expiry.
+function set_downloads($dir, $name, $count) {
+    $downloads = read_downloads($dir);
+    if ($count === null) {
+        if (!isset($downloads[$name])) {
+            return;
+        }
+        unset($downloads[$name]);
+    } else {
+        $downloads[$name] = $count;
+    }
+    clearstatcache(true, $dir);
+    $changed = filemtime($dir);
+    if ($downloads) {
+        $handle = fopen("$dir/.downloads", 'c');
+        ftruncate($handle, 0);
+        fwrite($handle, json_encode($downloads));
+        fclose($handle);
+    } elseif (is_file("$dir/.downloads")) {
+        unlink("$dir/.downloads");
+    }
+    touch($dir, $changed);
 }
 
 function files_version($files) {
@@ -448,6 +481,9 @@ function delete_note($text, $dir) {
     }
     foreach (list_files($dir) as $file) {
         unlink("$dir/{$file['name']}");
+    }
+    if (is_file("$dir/.downloads")) {
+        unlink("$dir/.downloads");
     }
     @rmdir($dir);
 }
@@ -694,6 +730,7 @@ if (isset($_GET['upload']) && ($method === 'POST' || $method === 'PUT')) {
         fail(507, t('err_storage_full', ['n' => $max_total_size >> 20]));
     }
     rename($temp, $target);
+    set_downloads($files_dir, $name, null);
     send_files($files_dir);
 }
 
@@ -702,13 +739,12 @@ if ((isset($_GET['delete']) || isset($_GET['empty'])) && $method === 'POST') {
     $lock = fopen($save_path . '/.lock', 'c');
     flock($lock, LOCK_EX);
     if (isset($_GET['empty'])) {
-        foreach (list_files($files_dir) as $file) {
-            unlink("$files_dir/{$file['name']}");
-        }
+        delete_note('', $files_dir);
     } elseif (valid_file_name($_GET['delete']) && is_file("$files_dir/{$_GET['delete']}")) {
         unlink("$files_dir/{$_GET['delete']}");
+        set_downloads($files_dir, $_GET['delete'], null);
+        list_files($files_dir) ?: delete_note('', $files_dir);
     }
-    @rmdir($files_dir);
     send_files($files_dir);
 }
 
@@ -716,6 +752,12 @@ if ((isset($_GET['delete']) || isset($_GET['empty'])) && $method === 'POST') {
 if (isset($_GET['file'])) {
     if (!valid_file_name($_GET['file']) || !is_file($file = "$files_dir/{$_GET['file']}")) {
         fail(404, 'Not found');
+    }
+    if ($method === 'GET') {
+        $lock = fopen($save_path . '/.lock', 'c');
+        flock($lock, LOCK_EX);
+        set_downloads($files_dir, $_GET['file'], (read_downloads($files_dir)[$_GET['file']] ?? 0) + 1);
+        flock($lock, LOCK_UN);
     }
     send_attachment($file, $_GET['file']);
 }
@@ -1906,7 +1948,27 @@ a.name:hover {
     line-height: 18px;
     opacity: 0.5;
 }
-/* Small icon buttons next to the size: download and copy the curl command */
+/* Download and copy the curl command, on the right of the card */
+.file .actions {
+    display: flex;
+    flex-shrink: 0;
+    gap: 2px;
+}
+.file .actions:empty {
+    display: none;
+}
+.file .actions .file-action {
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+}
+.file .actions svg {
+    width: 20px;
+    height: 20px;
+}
+.file .size small {
+    font-size: 9px;
+}
 .file-action {
     display: flex;
     align-items: center;
@@ -1927,29 +1989,17 @@ a.name:hover {
     opacity: 1;
     background: rgba(var(--teal), 0.15);
 }
+/* Fixed width too, so the size and buttons stay aligned */
+.file .downloads {
+    min-width: 4ch;
+    margin-right: 4px;
+    font-size: 11px;
+    line-height: 18px;
+    opacity: 0.5;
+}
 .file-action.copied {
     color: rgb(var(--ok));
     opacity: 1;
-}
-.file .remove {
-    flex-shrink: 0;
-    width: 32px;
-    height: 32px;
-    padding: 0;
-    font-size: 26px;
-    line-height: 1;
-    color: rgb(var(--text));
-    background: transparent;
-    border: 0;
-    border-radius: 6px;
-    opacity: 0.35;
-    cursor: pointer;
-    transition: opacity 0.15s, color 0.15s, background 0.15s;
-}
-.file .remove:hover {
-    color: rgb(var(--danger));
-    opacity: 1;
-    background: rgba(var(--danger), 0.15);
 }
 .file.uploading {
     opacity: 0.6;
@@ -2565,8 +2615,18 @@ function fileRow(name, detail, href) {
     meta.appendChild(details);
     var size = document.createElement('span');
     size.className = 'size';
-    size.textContent = detail;
+    // The unit ("KB", "MB"…) goes smaller and right after the number.
+    var parts = detail.match(/^([\d.]+) (\S+)$/);
+    size.textContent = parts ? parts[1] : detail;
+    if (parts) {
+        var unit = document.createElement('small');
+        unit.textContent = parts[2];
+        size.appendChild(unit);
+    }
     details.appendChild(size);
+    var actions = document.createElement('div');
+    actions.className = 'actions';
+    row.appendChild(actions);
     return row;
 }
 
@@ -2580,30 +2640,27 @@ function renderFiles() {
         var href = window.location.pathname + '?file=' + encodeURIComponent(file.name);
         var chip = fileRow(file.name, formatSize(file.size), href);
         var details = chip.querySelector('.details');
+        var actions = chip.querySelector('.actions');
+        var count = document.createElement('span');
+        count.className = 'downloads';
+        count.textContent = '↓' + (file.downloads || 0);
+        count.title = t('downloads_count', {n: file.downloads || 0});
+        details.insertBefore(count, details.firstChild);
         var download = document.createElement('a');
         download.className = 'file-action';
         download.href = href;
         download.title = t('download');
         download.innerHTML = DOWNLOAD_ICON;
-        details.appendChild(download);
+        actions.appendChild(download);
         var command = document.createElement('button');
         command.type = 'button';
         command.className = 'file-action';
         command.title = t('copy_download_command');
         command.innerHTML = COMMAND_ICONS;
         command.onclick = function() {
-            copyBlock('curl -O ' + noteUrl + '/' + file.name, command);
+            copyBlock('curl -sO ' + noteUrl + '/' + file.name, command);
         };
-        details.appendChild(command);
-        var remove = document.createElement('button');
-        remove.type = 'button';
-        remove.className = 'remove';
-        remove.title = t('delete_file');
-        remove.textContent = '×';
-        remove.onclick = function() {
-            fileRequest('POST', '?delete=' + encodeURIComponent(file.name));
-        };
-        chip.appendChild(remove);
+        actions.appendChild(command);
         filesList.appendChild(chip);
     });
     uploads.forEach(function(upload) {
@@ -2829,7 +2886,7 @@ if (openButton) {
                 download.className = 'file-action';
                 tr(download, 'download', null, 'title');
                 download.innerHTML = DOWNLOAD_ICON;
-                row.querySelector('.details').appendChild(download);
+                row.querySelector('.actions').appendChild(download);
                 row.querySelector('.name').onclick = download.onclick = function(event) {
                     event.preventDefault();
                     downloadSecretFile(data.token, index, file.name);
@@ -2963,6 +3020,23 @@ document.addEventListener('drop', function(e) {
         document.body.classList.remove('dragging');
         uploadFiles(e.dataTransfer.files);
     }
+});
+// Files pasted with Ctrl+V become attachments; plain text pastes are left alone.
+document.addEventListener('paste', function(e) {
+    var data = e.clipboardData;
+    if (!data || !data.files.length || data.types.indexOf('text/plain') !== -1) {
+        return;
+    }
+    e.preventDefault();
+    var stamp = new Date().toISOString().replace(/\D/g, '').slice(0, 14);
+    uploadFiles(Array.prototype.map.call(data.files, function(file, i) {
+        // Screenshots arrive as "image.png": give them a unique name so they don't overwrite each other.
+        if (!/^image\.\w+$/.test(file.name)) {
+            return file;
+        }
+        var ext = file.name.split('.').pop();
+        return new File([file], 'pasted-' + stamp + (i ? '-' + i : '') + '.' + ext, {type: file.type});
+    }));
 });
 showModified();
 updateStatus();
