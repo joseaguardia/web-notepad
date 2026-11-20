@@ -7,7 +7,7 @@
 $save_path = rtrim(getenv('NOTES_PATH') ?: '/var/lib/notas', '/');
 
 // Shown in the footer next to the GitHub link. Bump it on each release.
-$app_version = '2.5';
+$app_version = '2.5.1';
 $repo_url = 'https://github.com/joseaguardia/web-notepad';
 
 // Attachment limits: size of each file, and total size of all attachments of all notes.
@@ -1535,6 +1535,24 @@ body {
     transform: translate(4px, -50%);
     transition: opacity 0.15s, transform 0.15s;
 }
+/* Keyboard shortcut keys inside a label */
+.action small kbd {
+    display: inline-block;
+    min-width: 20px;
+    margin-left: 4px;
+    padding: 0 5px;
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 18px;
+    text-align: center;
+    background: rgba(var(--accent), 0.1);
+    border: 1px solid rgba(var(--accent), 0.35);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+}
+.action small kbd:first-of-type {
+    margin-left: 10px;
+}
 .action:hover small {
     opacity: 1;
     transform: translate(0, -50%);
@@ -2073,7 +2091,7 @@ if ($initial_text !== false) {
 <?php if (!$secret): ?>
 <button id="refresh" class="action" type="button"<?php ta('title', 'refresh_title'); ?>><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg><small<?php tt('refresh'); ?></small></button>
 <button id="clear" class="action" type="button"<?php ta('title', 'clear_title'); ?>><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m16 22-1-4"/><path d="M19 14a1 1 0 0 0 1-1v-1a2 2 0 0 0-2-2h-3a1 1 0 0 1-1-1V4a2 2 0 0 0-4 0v5a1 1 0 0 1-1 1H6a2 2 0 0 0-2 2v1a1 1 0 0 0 1 1"/><path d="M5 14h14l1.973 6.767A1 1 0 0 1 20 22H4a1 1 0 0 1-.973-1.233z"/><path d="m8 22 1-4"/></svg><small<?php tt('clear'); ?></small></button>
-<button id="attach" class="action" type="button"<?php ta('title', 'attach_title'); ?>><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg><small<?php tt('attach'); ?></small></button>
+<button id="attach" class="action" type="button"<?php ta('title', 'attach_title'); ?>><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg><small><span<?php tt('attach'); ?></span><kbd class="mod-key">Ctrl</kbd><kbd>V</kbd></small></button>
 <button id="make-secret" class="action" type="button"<?php ta('title', 'make_secret_title'); ?>><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".5" fill="currentColor"/></svg><small<?php tt('make_secret'); ?></small></button>
 <input id="file-input" type="file" multiple hidden>
 <?php endif; ?>
@@ -3001,6 +3019,9 @@ document.addEventListener('dragover', function(e) {
         e.preventDefault();
     }
 });
+if (/Mac|iPhone|iPad/.test(navigator.platform)) {
+    document.querySelector('#attach .mod-key').textContent = '⌘';
+}
 document.getElementById('attach').onclick = function() {
     fileInput.click();
 };
