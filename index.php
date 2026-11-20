@@ -7,7 +7,7 @@
 $save_path = rtrim(getenv('NOTES_PATH') ?: '/var/lib/notas', '/');
 
 // Shown in the footer next to the GitHub link. Bump it on each release.
-$app_version = '2.5.1';
+$app_version = '2.5.2';
 $repo_url = 'https://github.com/joseaguardia/web-notepad';
 
 // Attachment limits: size of each file, and total size of all attachments of all notes.
@@ -1507,12 +1507,49 @@ body {
     border-radius: 12px;
     box-shadow: 0 6px 18px var(--shadow-soft);
     backdrop-filter: blur(4px);
-    transition: background 0.15s, border-color 0.15s, transform 0.15s;
+    /* Springy timing, so the press bounces back on release */
+    transition: background 0.15s, border-color 0.15s, box-shadow 0.2s, transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 .action:hover {
     background: rgba(var(--accent), 0.2);
     border-color: rgba(var(--accent), 0.7);
+    box-shadow: 0 6px 18px var(--shadow-soft), 0 0 0 3px rgba(var(--accent), 0.05), 0 0 16px rgba(var(--accent), 0.18);
     transform: translateY(-1px);
+}
+.action:active:not(:disabled) {
+    transform: scale(0.95);
+    transition-duration: 0.15s, 0.15s, 0.2s, 0.08s;
+}
+/* Each icon plays its own short animation once on hover */
+.action:hover:not(:disabled) > svg {
+    animation: 0.5s ease-in-out;
+}
+#copy-all:hover > svg { animation-name: icon-lift; }
+#refresh:hover:not(:disabled) > svg { animation-name: icon-spin; animation-duration: 0.6s; }
+#clear:hover:not(:disabled) > svg { animation-name: icon-sweep; transform-origin: 50% 10%; }
+#attach:hover > svg { animation-name: icon-tilt; }
+#make-secret:hover > svg { animation-name: icon-turn; }
+@keyframes icon-lift {
+    50% { transform: translate(-1px, -1px); }
+}
+@keyframes icon-spin {
+    to { transform: rotate(360deg); }
+}
+@keyframes icon-sweep {
+    25% { transform: rotate(-7deg); }
+    75% { transform: rotate(7deg); }
+}
+@keyframes icon-tilt {
+    40% { transform: rotate(-9deg); }
+    70% { transform: rotate(3deg); }
+}
+@keyframes icon-turn {
+    50% { transform: rotate(-18deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .action > svg {
+        animation: none !important;
+    }
 }
 .action:disabled {
     opacity: 0.5;
@@ -1527,9 +1564,6 @@ body {
     line-height: 20px;
     white-space: nowrap;
     color: rgb(var(--accent));
-    background: rgb(var(--surface));
-    border: 1px solid rgba(var(--accent), 0.35);
-    border-radius: 6px;
     opacity: 0;
     pointer-events: none;
     transform: translate(4px, -50%);
